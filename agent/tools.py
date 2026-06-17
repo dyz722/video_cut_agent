@@ -106,6 +106,12 @@ def _render(**kw):
                           background=kw.get("background", True))
 
 
+def _review_timeline(**kw):
+    from action.review import review_timeline
+    return review_timeline(kw.get("path", "timeline.json"),
+                           kw.get("open_browser", True))
+
+
 def _qc(**kw):
     from action.qc import qc_check
     return qc_check(kw["path"], kw.get("sample_frames", 4))
@@ -148,6 +154,7 @@ TOOL_HANDLERS = {
     "watch_video":      _watch,
     "tts":              _tts,
     "validate_timeline": _validate_timeline,
+    "review_timeline":  _review_timeline,
     "render_timeline":  _render,
     "qc_check":         _qc,
 }
@@ -256,6 +263,15 @@ TOOLS = [
         "Validate a timeline.json (schema, source files exist, timecodes legal) "
         "WITHOUT rendering. Always run before render_timeline.",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}},
+    {"name": "review_timeline", "description":
+        "Generate a local HTML review page for a timeline before rendering. The user can "
+        "inspect clips/subtitles/overlays, make edits, save timeline.reviewed.json, and "
+        "produce review_log.json for later experience learning. Use this before render "
+        "unless the user explicitly skips visual review.",
+     "input_schema": {"type": "object", "properties": {
+         "path": {"type": "string"},
+         "open_browser": {"type": "boolean",
+                          "description": "Open the review URL in the default browser."}}}},
     {"name": "render_timeline", "description":
         "Render timeline.json into the final video via the deterministic ffmpeg "
         "renderer. Slow -> runs in background by default; you get notified. "

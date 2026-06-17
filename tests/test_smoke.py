@@ -48,6 +48,7 @@ def main():
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
     from action import timeline as tl_mod
+    from action.review import review_timeline
     from action.render import render_file
     from action.qc import qc_check
     from action.ass_effects import build_ass
@@ -63,7 +64,8 @@ def main():
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)
-    for name in ("timeline-format", "ecommerce-clip", "manju-compilation"):
+    for name in ("timeline-format", "visual-review-protocol",
+                 "ecommerce-clip", "manju-compilation"):
         check(f"skill {name}", name in sk.skills)
         check(f"skill {name} loadable", sk.load(name).startswith("<skill"))
     learned_dir = config.LEARNED_SKILLS_DIR / "learned-smoke-test"
@@ -131,6 +133,10 @@ def main():
     (proj / "timeline_smoke.json").write_text(json.dumps(tl, ensure_ascii=False))
     v = tl_mod.validate_file("timeline_smoke.json")
     check("valid timeline passes", v.startswith("VALID"), v)
+    rv = review_timeline("timeline_smoke.json", open_browser=False, start_server=False)
+    review_dir = proj / "review" / "timeline_smoke"
+    check("review_timeline generates html", (review_dir / "index.html").exists(), rv)
+    check("review_timeline stores original", (review_dir / "original.json").exists(), rv)
 
     bad = json.loads(json.dumps(tl))
     bad["clips"][0]["out"] = 99  # 超源时长

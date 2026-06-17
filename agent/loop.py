@@ -28,8 +28,10 @@ Standard workflow (follow unless the user says otherwise):
      同时加载最匹配的一份
   3. TodoWrite 列出出片计划 (每条成片一个 todo)
   4. 写 timeline_<n>.json -> validate_timeline 自检
-  5. render_timeline 渲染 (自动走后台, 等通知)
-  6. qc_check + watch_video 抽查成片; 不合格改 timeline 重渲染
+  5. review_timeline 生成 HTML 审核页, 让用户确认/修改; 如用户保存了
+     timeline.reviewed.json, 后续以修订版为准
+  6. render_timeline 渲染 (自动走后台, 等通知)
+  7. qc_check + watch_video 抽查成片; 不合格改 timeline 重渲染
 
 Rules:
 - transcript/scenes JSON 用 read_file 的 offset/limit 或 bash grep 查询, 严禁整文件读入。
@@ -37,6 +39,8 @@ Rules:
 - 超长素材(>30min)用 task 派 subagent 分段分析, 只回收结构化摘要。
 - 剪辑判断力 (什么是钩子/节奏/片长/字幕样式) 以加载的赛道 skill 为准, 不要凭空发挥。
 - 渲染和长转写丢后台后, 可以继续规划下一条片子, 不要干等。
+- 交互模式下, 渲染前默认使用 review_timeline 给用户做可视化确认; 用户明确
+  要跳过时才直接渲染。
 - 用户确认满意、反复修正出稳定偏好、或一次 QC/返工形成可复用经验后,
   调用 record_experience 沉淀为 learned-* skill。只记录可复用剪辑判断,
   不记录密钥、客户隐私、原始转写大段文本或私有素材文件名。

@@ -7,6 +7,7 @@
 - Agent 是模型，项目代码是 harness。
 - 剪辑判断沉淀在 `skills/`，按需加载，不把所有知识塞进 system prompt。
 - 模型只产出 `timeline*.json`，最终视频由确定性渲染器执行。
+- 渲染前默认通过 HTML 审核页让用户确认或修改 timeline。
 - 长转写、渲染等慢任务走后台，完成后再回到 agent loop。
 - 用户认可的剪辑经验可以沉淀为 `learned-*` skill，后续自动复用。
 
@@ -145,8 +146,31 @@ veoai demo \
 3. `detect_scenes` 找自然切点。
 4. `load_skill` 加载对应赛道策略，例如 `ecommerce-clip` 或 `manju-compilation`。
 5. 写入 `timeline_<n>.json` 并运行 `validate_timeline`。
-6. `render_timeline` 调用 ffmpeg 渲染。
-7. `qc_check` 和 `watch_video` 抽查成片，必要时返工。
+6. `review_timeline` 生成本地 HTML 审核页，让用户确认或修改 clips、subtitles、overlays 和 audio。
+7. 如果用户保存了 `review/<timeline>/timeline.reviewed.json`，优先渲染这份修订版。
+8. `render_timeline` 调用 ffmpeg 渲染。
+9. `qc_check` 和 `watch_video` 抽查成片，必要时返工。
+
+## 可视化审核
+
+剪辑 agent 的交互不只发生在终端。渲染前，agent 默认会调用 `review_timeline` 生成一个本地 HTML 审核页：
+
+```text
+review/<timeline名>/
+  index.html               审核页面
+  original.json            原始 timeline 备份
+  timeline.reviewed.json   用户保存后的修订版
+  review_log.json          用户备注、修改字段和原始/修订 diff 原料
+```
+
+用户可以在网页里：
+
+- 删除或调整 clip 的 `in/out`、速度、音量、画面适配和转场。
+- 修改字幕时间、文案、样式和动效。
+- 编辑 overlays / audio JSON。
+- 填写修改原因，并保存为“批准”或“需要返工”。
+
+`review_log.json` 是经验沉淀的原料。agent 会从用户修改中归纳可复用偏好，例如“钩子太慢要缩短铺垫”“促销字幕更大”“漫剧开头必须直接上冲突画面”。只有用户确认这些偏好可复用后，才会调用 `record_experience` 写入全局 learned skill。
 
 ## 剪辑经验沉淀
 
@@ -169,6 +193,7 @@ veoai demo \
 ## 内置 Skills
 
 - `timeline-format`：`timeline*.json` 格式规范。
+- `visual-review-protocol`：渲染前 HTML 审核、用户修改记录和经验沉淀协议。
 - `ecommerce-clip`：直播带货、种草、转化类短视频策略。
 - `manju-compilation`：漫剧合集、剧情节奏和情绪钩子策略。
 
@@ -186,6 +211,7 @@ python tests/test_smoke.py
 
 - 模块导入和工具 schema/handler 对齐
 - skill 加载和 learned skill 写入
+- HTML timeline 审核页生成
 - timeline 校验
 - ffmpeg 端到端渲染
 - 质检报告
