@@ -93,14 +93,14 @@ def batch(task: str):
                 print(block.text)
 
 
-if __name__ == "__main__":
+def main(argv=None):
     ap = argparse.ArgumentParser(description="video-agent: 剪辑 agent")
     ap.add_argument("project", help="项目名 (workspace/<project>/)")
     ap.add_argument("--materials", help="素材文件/目录, 链接进项目 materials/")
     ap.add_argument("--batch", help="批处理任务描述, 非交互执行")
     ap.add_argument("--auto", action="store_true",
                     help="渲染免人工审批 (--batch 时默认开启)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     config.ensure_config()
     config.set_project(args.project)
@@ -112,3 +112,7 @@ if __name__ == "__main__":
         batch(args.batch)
     else:
         repl()
+
+
+if __name__ == "__main__":
+    main()

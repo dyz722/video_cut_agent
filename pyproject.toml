@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-cut-agent"
+version = "0.1.0"
+description = "A Claude Code style harness for video editing agents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "python-dotenv>=1.0.0",
+    "dashscope>=1.20.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+video-agent = "main:main"
+video-cut-agent = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["action", "agent", "perception", "skills"]
+
+[tool.setuptools.package-data]
+skills = ["**/*.md"]

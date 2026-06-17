@@ -11,7 +11,7 @@ from .todo import TODO
 from .skills import SkillLoader
 from .background import BG
 
-SKILLS = SkillLoader(config.SKILLS_DIR)
+SKILLS = SkillLoader(config.SKILLS_DIRS)
 
 
 # === 基础工具 ===
@@ -116,6 +116,19 @@ def _subagent(**kw):
     return run_subagent(kw["prompt"], kw.get("agent_type", "Analyze"))
 
 
+def _record_experience(**kw):
+    from .experience import record_experience
+    result = record_experience(
+        kw["scenario"],
+        kw["lesson"],
+        kw.get("user_feedback", ""),
+        kw.get("artifacts", ""),
+        kw.get("tags"),
+    )
+    SKILLS.reload()
+    return result
+
+
 TOOL_HANDLERS = {
     "bash":             lambda **kw: run_bash(kw["command"]),
     "read_file":        lambda **kw: run_read(kw["path"], kw.get("limit"), kw.get("offset")),
@@ -123,6 +136,7 @@ TOOL_HANDLERS = {
     "edit_file":        lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     "TodoWrite":        lambda **kw: TODO.update(kw["items"]),
     "load_skill":       lambda **kw: SKILLS.load(kw["name"]),
+    "record_experience": _record_experience,
     "compress":         lambda **kw: "Compressing...",
     "task":             _subagent,
     "background_run":   lambda **kw: BG.run(kw["command"], kw.get("timeout", 1800),
@@ -171,6 +185,21 @@ TOOLS = [
         "ALWAYS load the matching skill before planning any edit.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}},
                       "required": ["name"]}},
+    {"name": "record_experience", "description":
+        "Persist a reusable editing lesson as a learned skill after the user confirms "
+        "a result, preference, or correction is useful. Store compact lessons only; "
+        "do not store secrets, raw transcripts, customer data, or private file names.",
+     "input_schema": {"type": "object", "properties": {
+         "scenario": {"type": "string",
+                      "description": "Scenario such as ecommerce-clip, manju-compilation, or a custom niche."},
+         "lesson": {"type": "string",
+                    "description": "Reusable rule/preference learned from the accepted result."},
+         "user_feedback": {"type": "string",
+                           "description": "Short user signal that made this worth remembering."},
+         "artifacts": {"type": "string",
+                       "description": "Optional generic references, e.g. timeline path or style names."},
+         "tags": {"type": "array", "items": {"type": "string"}}},
+         "required": ["scenario", "lesson"]}},
     {"name": "compress", "description": "Manually compress conversation context.",
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "task", "description":

@@ -15,9 +15,18 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
-ENV_PATH = ROOT / ".env"
+USER_DATA_DIR = Path(os.getenv("VIDEO_AGENT_HOME", "~/.video-agent")).expanduser()
+ENV_PATH = Path(os.getenv(
+    "VIDEO_AGENT_ENV",
+    ROOT / ".env" if (ROOT / ".env.example").exists() else USER_DATA_DIR / ".env",
+)).expanduser()
 SKILLS_DIR = ROOT / "skills"
-WORKSPACE_ROOT = ROOT / "workspace"
+LEARNED_SKILLS_DIR = Path(os.getenv(
+    "VIDEO_AGENT_LEARNED_SKILLS_DIR",
+    USER_DATA_DIR / "skills" / "_learned",
+)).expanduser()
+SKILLS_DIRS = [SKILLS_DIR, LEARNED_SKILLS_DIR]
+WORKSPACE_ROOT = Path(os.getenv("VIDEO_AGENT_WORKSPACE", Path.cwd() / "workspace")).expanduser()
 
 # -- 当前项目工作区 (main.py 启动时设置) --
 PROJECT_DIR: Path = WORKSPACE_ROOT / "default"
@@ -54,6 +63,7 @@ def ensure_config():
                 os.environ[key] = val
                 new_lines.append(f"{key}={val}")
     if new_lines:
+        ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(ENV_PATH, "a") as f:
             f.write("\n" + "\n".join(new_lines) + "\n")
         print(f"[配置] 已保存到 {ENV_PATH}")
@@ -96,7 +106,7 @@ def client() -> Anthropic:
 def set_project(name: str) -> Path:
     """初始化/切换项目工作区, 返回项目目录。"""
     global PROJECT_DIR
-    PROJECT_DIR = WORKSPACE_ROOT / name
+    PROJECT_DIR = (WORKSPACE_ROOT / name).resolve()
     for sub in ("materials", "analysis", "analysis/frames", "output", ".cache"):
         (PROJECT_DIR / sub).mkdir(parents=True, exist_ok=True)
     return PROJECT_DIR

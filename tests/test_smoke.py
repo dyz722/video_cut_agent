@@ -41,6 +41,7 @@ def main():
     from agent import config
     from agent.todo import TodoManager
     from agent.skills import SkillLoader
+    from agent.experience import record_experience
     import agent.loop  # noqa
     import agent.subagent  # noqa
     from agent.tools import TOOLS, TOOL_HANDLERS
@@ -55,10 +56,18 @@ def main():
           str({t["name"] for t in TOOLS} ^ set(TOOL_HANDLERS.keys())))
 
     print("[2] skills")
-    sk = SkillLoader(config.SKILLS_DIR)
+    sk = SkillLoader(config.SKILLS_DIRS)
     for name in ("timeline-format", "ecommerce-clip", "manju-compilation"):
         check(f"skill {name}", name in sk.skills)
         check(f"skill {name} loadable", sk.load(name).startswith("<skill"))
+    learned_dir = config.LEARNED_SKILLS_DIR / "learned-smoke-test"
+    shutil.rmtree(learned_dir, ignore_errors=True)
+    rec = record_experience("smoke-test", "Prefer a strong 3-second hook.", "accepted")
+    sk.reload()
+    check("record_experience creates learned skill", "learned-smoke-test" in sk.skills, rec)
+    check("learned skill loadable", sk.load("learned-smoke-test").startswith("<skill"))
+    shutil.rmtree(learned_dir, ignore_errors=True)
+    sk.reload()
 
     print("[3] synthetic materials")
     proj = config.set_project("_smoke")

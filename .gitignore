@@ -16,4 +16,8 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+build/
+dist/
+*.egg-info/
+
 workspace/

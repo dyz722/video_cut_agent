@@ -11,27 +11,31 @@ from pathlib import Path
 
 
 class SkillLoader:
-    def __init__(self, skills_dir: Path):
-        self.skills_dir = skills_dir
+    def __init__(self, skills_dir: Path | list[Path]):
+        if isinstance(skills_dir, (list, tuple)):
+            self.skill_dirs = [Path(p) for p in skills_dir]
+        else:
+            self.skill_dirs = [Path(skills_dir)]
         self.skills = {}
         self.reload()
 
     def reload(self):
         self.skills = {}
-        if not self.skills_dir.exists():
-            return
-        for f in sorted(self.skills_dir.rglob("SKILL.md")):
-            text = f.read_text()
-            match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
-            meta, body = {}, text
-            if match:
-                for line in match.group(1).strip().splitlines():
-                    if ":" in line:
-                        k, v = line.split(":", 1)
-                        meta[k.strip()] = v.strip()
-                body = match.group(2).strip()
-            name = meta.get("name", f.parent.name)
-            self.skills[name] = {"meta": meta, "body": body, "dir": str(f.parent)}
+        for skills_dir in self.skill_dirs:
+            if not skills_dir.exists():
+                continue
+            for f in sorted(skills_dir.rglob("SKILL.md")):
+                text = f.read_text()
+                match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+                meta, body = {}, text
+                if match:
+                    for line in match.group(1).strip().splitlines():
+                        if ":" in line:
+                            k, v = line.split(":", 1)
+                            meta[k.strip()] = v.strip()
+                    body = match.group(2).strip()
+                name = meta.get("name", f.parent.name)
+                self.skills[name] = {"meta": meta, "body": body, "dir": str(f.parent)}
 
     def descriptions(self) -> str:
         if not self.skills:
