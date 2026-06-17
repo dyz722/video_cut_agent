@@ -17,8 +17,6 @@ dependencies = [
 
 [project.scripts]
 veoai = "main:main"
-video-agent = "main:main"
-video-cut-agent = "main:main"
 
 [tool.setuptools]
 py-modules = ["main"]

@@ -57,6 +57,9 @@ def main():
           str({t["name"] for t in TOOLS} ^ set(TOOL_HANDLERS.keys())))
     pyproject = (ROOT / "pyproject.toml").read_text()
     check("veoai CLI entry registered", 'veoai = "main:main"' in pyproject)
+    check("legacy CLI aliases removed",
+          'video-agent = "main:main"' not in pyproject
+          and 'video-cut-agent = "main:main"' not in pyproject)
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)

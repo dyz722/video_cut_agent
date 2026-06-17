@@ -31,8 +31,6 @@ python -m pip install git+https://github.com/dyz722/video_cut_agent.git
 ```bash
 veoai
 veoai --help
-video-agent --help
-video-cut-agent --help
 ```
 
 ### 本地开发安装
@@ -103,7 +101,6 @@ veoai
 
 ```bash
 veoai demo --materials ~/Videos/source/
-video-agent demo --materials ~/Videos/source/
 ```
 
 进入 REPL 后可以直接描述任务：
