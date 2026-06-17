@@ -34,6 +34,14 @@ def _safe_review_dir(review: str) -> Path:
     return target
 
 
+def _write_json(path: Path, data):
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _make_handler(root: Path):
     class ReviewHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -53,30 +61,45 @@ def _make_handler(root: Path):
                 query = urllib.parse.parse_qs(parsed.query)
                 review_rel = query.get("review", [""])[0]
                 review_dir = _safe_review_dir(review_rel)
-                revised = payload.get("timeline")
-                if not isinstance(revised, dict):
-                    raise ValueError("payload.timeline must be an object")
-
-                errors = validate(revised)
-                reviewed_path = review_dir / "timeline.reviewed.json"
-                log_path = review_dir / "review_log.json"
-                reviewed_path.write_text(json.dumps(revised, ensure_ascii=False, indent=2),
-                                         encoding="utf-8")
-                review_log = {
-                    "saved_at": datetime.now().isoformat(timespec="seconds"),
-                    "valid": not errors,
-                    "validation_errors": errors,
-                    **payload.get("review_log", {}),
-                }
-                log_path.write_text(json.dumps(review_log, ensure_ascii=False, indent=2),
-                                    encoding="utf-8")
-                body = {
-                    "ok": True,
-                    "valid": not errors,
-                    "validation_errors": errors,
-                    "timeline_path": str(reviewed_path.relative_to(config.PROJECT_DIR)),
-                    "review_log_path": str(log_path.relative_to(config.PROJECT_DIR)),
-                }
+                if "timeline" in payload:
+                    revised = payload.get("timeline")
+                    if not isinstance(revised, dict):
+                        raise ValueError("payload.timeline must be an object")
+                    errors = validate(revised)
+                    reviewed_path = review_dir / "timeline.reviewed.json"
+                    log_path = review_dir / "review_log.json"
+                    _write_json(reviewed_path, revised)
+                    review_log = {
+                        "saved_at": datetime.now().isoformat(timespec="seconds"),
+                        "kind": "timeline",
+                        "valid": not errors,
+                        "validation_errors": errors,
+                        **payload.get("review_log", {}),
+                    }
+                    _write_json(log_path, review_log)
+                    body = {
+                        "ok": True,
+                        "kind": "timeline",
+                        "valid": not errors,
+                        "validation_errors": errors,
+                        "timeline_path": str(reviewed_path.relative_to(config.PROJECT_DIR)),
+                        "review_log_path": str(log_path.relative_to(config.PROJECT_DIR)),
+                    }
+                elif "render_review" in payload:
+                    review_log = {
+                        "saved_at": datetime.now().isoformat(timespec="seconds"),
+                        "kind": "render",
+                        **payload.get("render_review", {}),
+                    }
+                    log_path = review_dir / "render_review_log.json"
+                    _write_json(log_path, review_log)
+                    body = {
+                        "ok": True,
+                        "kind": "render",
+                        "render_review_log_path": str(log_path.relative_to(config.PROJECT_DIR)),
+                    }
+                else:
+                    raise ValueError("payload must contain timeline or render_review")
                 data = json.dumps(body, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -372,3 +395,242 @@ def review_timeline(path: str = "timeline.json", open_browser: bool = True,
             f"Source: {path}\n"
             f"Saves reviewed timeline to: {review_rel}/timeline.reviewed.json\n"
             f"Saves review log to: {review_rel}/review_log.json")
+
+
+def _render_output_review_html(path: str, review_rel: str, qc_report: str) -> str:
+    video_url = "/" + urllib.parse.quote(path)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>veoai render review</title>
+  <style>
+    :root {{ color-scheme: dark; --bg:#0b0d12; --panel:#151923; --line:#2a3040;
+      --text:#f4f7fb; --muted:#9aa4b2; --brand:#7c9cff; --ok:#57d68d; --warn:#ffcf5a; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif;
+      background:var(--bg); color:var(--text); }}
+    header {{ padding:16px 22px; background:#0f131c; border-bottom:1px solid var(--line);
+      display:flex; justify-content:space-between; gap:16px; align-items:center; }}
+    main {{ padding:22px; display:grid; grid-template-columns:minmax(360px, 1.3fr) 1fr;
+      gap:18px; max-width:1440px; margin:auto; }}
+    section {{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }}
+    h1 {{ font-size:18px; margin:0 0 4px; }} h2 {{ font-size:16px; margin:0 0 12px; }}
+    .muted {{ color:var(--muted); font-size:12px; }}
+    video {{ width:100%; max-height:76vh; background:#000; border-radius:12px; }}
+    textarea, input {{ width:100%; background:#0f131c; color:var(--text);
+      border:1px solid var(--line); border-radius:8px; padding:9px; font:inherit; }}
+    textarea {{ min-height:100px; resize:vertical; }}
+    label {{ display:block; margin:9px 0; }}
+    button {{ border:1px solid var(--line); background:#1f2740; color:var(--text);
+      border-radius:999px; padding:9px 14px; cursor:pointer; margin-right:8px; }}
+    button.primary {{ background:var(--brand); color:#07101f; font-weight:700; }}
+    pre {{ white-space:pre-wrap; background:#0f131c; border:1px solid var(--line);
+      border-radius:10px; padding:12px; overflow:auto; }}
+    .ok {{ color:var(--ok); }} .warn {{ color:var(--warn); }}
+    @media (max-width: 980px) {{ main {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>veoai render review</h1>
+    <div class="muted">成片: <code>{path}</code></div>
+  </div>
+  <div><button class="primary" onclick="saveReview('approved')">批准成片</button></div>
+</header>
+<main>
+  <section>
+    <h2>成片预览</h2>
+    <video controls src="{video_url}"></video>
+  </section>
+  <section>
+    <h2>质检与反馈</h2>
+    <pre>{qc_report}</pre>
+    <label><input type="checkbox" value="hook_weak"> 开头钩子弱 / 进入主题慢</label>
+    <label><input type="checkbox" value="subtitle_issue"> 字幕遮挡、太小、错字或节奏不对</label>
+    <label><input type="checkbox" value="visual_issue"> 画面裁切、商品/角色展示不清晰</label>
+    <label><input type="checkbox" value="audio_issue"> 声音太小、太吵、BGM 压人声</label>
+    <label><input type="checkbox" value="pace_issue"> 节奏拖沓或剪太碎</label>
+    <label>修改意见<textarea id="notes" placeholder="说明哪里满意、哪里要改，以及原因。"></textarea></label>
+    <button class="primary" onclick="saveReview('approved')">满意并保存</button>
+    <button onclick="saveReview('needs_revision')">需要返工</button>
+    <span id="status" class="muted"></span>
+  </section>
+</main>
+<script>
+const REVIEW_REL = {json.dumps(review_rel, ensure_ascii=False)};
+const VIDEO_PATH = {json.dumps(path, ensure_ascii=False)};
+const QC_REPORT = {json.dumps(qc_report, ensure_ascii=False)};
+
+async function saveReview(status) {{
+  const issues = [...document.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value);
+  const payload = {{
+    render_review: {{
+      status,
+      output_path: VIDEO_PATH,
+      qc_report: QC_REPORT,
+      issue_tags: issues,
+      user_notes: document.getElementById('notes').value,
+    }}
+  }};
+  try {{
+    const res = await fetch(`/api/save?review=${{encodeURIComponent(REVIEW_REL)}}`, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(payload)
+    }});
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'save failed');
+    document.getElementById('status').innerHTML =
+      `<span class="ok">已保存: ${{data.render_review_log_path}}</span>`;
+  }} catch (e) {{
+    document.getElementById('status').innerHTML = `<span class="warn">${{e.message}}</span>`;
+  }}
+}}
+</script>
+</body>
+</html>
+"""
+
+
+def review_render(path: str, qc_report: str = "", open_browser: bool = True,
+                  start_server: bool = True) -> str:
+    """Generate a browser review page for a rendered output."""
+    fp = config.safe_path(path)
+    if not fp.exists():
+        return f"Error: rendered file not found: {path}"
+    if not qc_report:
+        from .qc import qc_check
+        qc_report = qc_check(path)
+
+    review_rel = f"review/render_{fp.stem}"
+    review_dir = _safe_review_dir(review_rel)
+    _write_json(review_dir / "render_input.json", {
+        "output_path": path,
+        "qc_report": qc_report,
+    })
+    index = review_dir / "index.html"
+    index.write_text(_render_output_review_html(path, review_rel, qc_report),
+                     encoding="utf-8")
+
+    if not start_server:
+        return (f"Render review page generated: {index.relative_to(config.PROJECT_DIR)}\n"
+                f"Open it after serving the project directory, or call with start_server=true.")
+
+    port = _ensure_server()
+    url = f"http://127.0.0.1:{port}/{review_rel}/index.html"
+    if open_browser:
+        webbrowser.open(url)
+    return (f"Render review ready: {url}\n"
+            f"Output: {path}\n"
+            f"Saves render review log to: {review_rel}/render_review_log.json")
+
+
+def _review_logs(paths=None) -> list[Path]:
+    if paths:
+        if isinstance(paths, str):
+            paths = [p.strip() for p in paths.split(",") if p.strip()]
+        return [config.safe_path(p) for p in paths]
+    return sorted((config.PROJECT_DIR / "review").glob("**/review_log.json")) + sorted(
+        (config.PROJECT_DIR / "review").glob("**/render_review_log.json"))
+
+
+def _candidate_from_timeline(log: dict) -> list[str]:
+    notes = (log.get("user_notes") or "").strip()
+    sections = log.get("changed_sections") or []
+    candidates = []
+    if notes:
+        candidates.append(f"用户审核 timeline 时备注: {notes}")
+    if "clips" in sections:
+        candidates.append("用户改动过 clips，复盘片段取舍、顺序、时长或切点是否形成偏好。")
+    if "subtitles" in sections:
+        candidates.append("用户改动过 subtitles，复盘字幕文案、大小、位置、样式或节奏偏好。")
+    if "overlays" in sections:
+        candidates.append("用户改动过 overlays，复盘横幅/贴片出现时机和遮挡偏好。")
+    if "audio" in sections:
+        candidates.append("用户改动过 audio，复盘原声、BGM、配音和 ducking 偏好。")
+    if log.get("status") == "needs_revision":
+        candidates.append("用户标记 timeline 需要返工，先总结问题类型，不要直接固化为规则。")
+    return candidates
+
+
+def _candidate_from_render(log: dict) -> list[str]:
+    notes = (log.get("user_notes") or "").strip()
+    issue_tags = log.get("issue_tags") or []
+    label_map = {
+        "hook_weak": "开头钩子弱或进入主题慢",
+        "subtitle_issue": "字幕遮挡、太小、错字或节奏不对",
+        "visual_issue": "画面裁切或主体展示不清晰",
+        "audio_issue": "声音、BGM 或人声混音问题",
+        "pace_issue": "节奏拖沓或剪太碎",
+    }
+    candidates = []
+    if notes:
+        candidates.append(f"用户审核成片时备注: {notes}")
+    for tag in issue_tags:
+        candidates.append(f"成片审核暴露问题: {label_map.get(tag, tag)}。")
+    if log.get("status") == "approved" and not issue_tags and notes:
+        candidates.append("用户批准成片且有正向备注，可抽象为该场景的交付偏好。")
+    return candidates
+
+
+def summarize_review_feedback(paths=None, scenario: str = "general",
+                              record_confirmed: bool = False) -> str:
+    """Summarize review logs into reusable lesson candidates."""
+    logs = _review_logs(paths)
+    if not logs:
+        return "No review logs found under review/."
+
+    candidates = []
+    sources = []
+    for fp in logs:
+        try:
+            log = _read_json(fp)
+        except Exception as e:
+            candidates.append(f"无法读取 {fp}: {e}")
+            continue
+        sources.append(str(fp.relative_to(config.PROJECT_DIR)))
+        kind = log.get("kind") or ("render" if fp.name == "render_review_log.json" else "timeline")
+        if kind == "render":
+            candidates.extend(_candidate_from_render(log))
+        else:
+            candidates.extend(_candidate_from_timeline(log))
+
+    deduped = []
+    seen = set()
+    for item in candidates:
+        if item and item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    if not deduped:
+        deduped = ["审核日志存在，但没有足够的用户备注或改动信号；先不要沉淀经验。"]
+
+    out = config.PROJECT_DIR / "analysis" / "review_experience_candidates.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    text = "\n".join([
+        f"# Review Experience Candidates: {scenario}",
+        "",
+        "## Sources",
+        *[f"- {s}" for s in sources],
+        "",
+        "## Candidates",
+        *[f"- {c}" for c in deduped],
+        "",
+        "确认这些候选可复用后，再调用 record_experience 写入 learned skill。",
+    ])
+    out.write_text(text, encoding="utf-8")
+
+    result = f"Wrote {out.relative_to(config.PROJECT_DIR)}\n\n{text}"
+    if record_confirmed:
+        from agent.experience import record_experience
+        recorded = record_experience(
+            scenario,
+            "\n".join(f"- {c}" for c in deduped),
+            user_feedback="User confirmed review-derived lessons are reusable.",
+            artifacts=", ".join(sources),
+            tags=["review-feedback"],
+        )
+        result += "\n\n" + recorded
+    return result

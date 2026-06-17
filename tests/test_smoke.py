@@ -48,7 +48,7 @@ def main():
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
     from action import timeline as tl_mod
-    from action.review import review_timeline
+    from action.review import review_timeline, review_render, summarize_review_feedback
     from action.render import render_file
     from action.qc import qc_check
     from action.ass_effects import build_ass
@@ -137,6 +137,13 @@ def main():
     review_dir = proj / "review" / "timeline_smoke"
     check("review_timeline generates html", (review_dir / "index.html").exists(), rv)
     check("review_timeline stores original", (review_dir / "original.json").exists(), rv)
+    (review_dir / "review_log.json").write_text(json.dumps({
+        "kind": "timeline",
+        "status": "approved",
+        "source_path": "timeline_smoke.json",
+        "changed_sections": ["clips", "subtitles"],
+        "user_notes": "钩子要更短，字幕要更大",
+    }, ensure_ascii=False))
 
     bad = json.loads(json.dumps(tl))
     bad["clips"][0]["out"] = 99  # 超源时长
@@ -170,6 +177,21 @@ def main():
     q = qc_check("output/smoke.mp4", sample_frames=3)
     check("qc report", q.startswith("QC report"), q[:200])
     check("qc loudness measured", "LUFS" in q)
+    rr = review_render("output/smoke.mp4", q, open_browser=False, start_server=False)
+    render_review_dir = proj / "review" / "render_smoke"
+    check("review_render generates html", (render_review_dir / "index.html").exists(), rr)
+    check("review_render stores input", (render_review_dir / "render_input.json").exists(), rr)
+    (render_review_dir / "render_review_log.json").write_text(json.dumps({
+        "kind": "render",
+        "status": "needs_revision",
+        "output_path": "output/smoke.mp4",
+        "issue_tags": ["subtitle_issue"],
+        "user_notes": "字幕太小，底部有点挡画面",
+    }, ensure_ascii=False))
+    summary = summarize_review_feedback(scenario="smoke-test")
+    candidates = proj / "analysis" / "review_experience_candidates.md"
+    check("summarize_review_feedback writes candidates", candidates.exists(), summary)
+    check("review feedback mentions subtitle issue", "字幕" in candidates.read_text(), summary)
     print("\n" + q)
 
     print(f"\n==== {PASS} passed, {FAIL} failed ====")

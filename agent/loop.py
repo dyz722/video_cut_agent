@@ -31,7 +31,10 @@ Standard workflow (follow unless the user says otherwise):
   5. review_timeline 生成 HTML 审核页, 让用户确认/修改; 如用户保存了
      timeline.reviewed.json, 后续以修订版为准
   6. render_timeline 渲染 (自动走后台, 等通知)
-  7. qc_check + watch_video 抽查成片; 不合格改 timeline 重渲染
+  7. qc_check 自检 -> review_render 生成成片审核页, 让用户确认/标注问题;
+     不合格改 timeline 重渲染
+  8. 用户确认满意或修改形成稳定偏好后, 先 summarize_review_feedback
+     产出候选经验, 经用户确认后再 record_experience
 
 Rules:
 - transcript/scenes JSON 用 read_file 的 offset/limit 或 bash grep 查询, 严禁整文件读入。
@@ -41,9 +44,11 @@ Rules:
 - 渲染和长转写丢后台后, 可以继续规划下一条片子, 不要干等。
 - 交互模式下, 渲染前默认使用 review_timeline 给用户做可视化确认; 用户明确
   要跳过时才直接渲染。
+- 成片交付前默认使用 review_render 做可视化验收; 用户明确要跳过时才直接交付。
 - 用户确认满意、反复修正出稳定偏好、或一次 QC/返工形成可复用经验后,
-  调用 record_experience 沉淀为 learned-* skill。只记录可复用剪辑判断,
-  不记录密钥、客户隐私、原始转写大段文本或私有素材文件名。
+  先调用 summarize_review_feedback 生成候选经验; 用户确认候选可复用后,
+  再调用 record_experience 或 summarize_review_feedback(record_confirmed=true)。
+  只记录可复用剪辑判断, 不记录密钥、客户隐私、原始转写大段文本或私有素材文件名。
 
 Skills available (load_skill):
 {skills}"""

@@ -149,7 +149,8 @@ veoai demo \
 6. `review_timeline` 生成本地 HTML 审核页，让用户确认或修改 clips、subtitles、overlays 和 audio。
 7. 如果用户保存了 `review/<timeline>/timeline.reviewed.json`，优先渲染这份修订版。
 8. `render_timeline` 调用 ffmpeg 渲染。
-9. `qc_check` 和 `watch_video` 抽查成片，必要时返工。
+9. `qc_check` 自检后，`review_render` 生成成片审核页，让用户播放成片、标注问题、确认交付。
+10. 用户满意或多轮修改形成稳定偏好后，`summarize_review_feedback` 先生成经验候选，经用户确认后再沉淀。
 
 ## 可视化审核
 
@@ -171,6 +172,25 @@ review/<timeline名>/
 - 填写修改原因，并保存为“批准”或“需要返工”。
 
 `review_log.json` 是经验沉淀的原料。agent 会从用户修改中归纳可复用偏好，例如“钩子太慢要缩短铺垫”“促销字幕更大”“漫剧开头必须直接上冲突画面”。只有用户确认这些偏好可复用后，才会调用 `record_experience` 写入全局 learned skill。
+
+渲染完成后，agent 会调用 `review_render` 生成成片审核页：
+
+```text
+review/render_<成片名>/
+  index.html               成片审核页面
+  render_input.json        成片路径和 QC 报告
+  render_review_log.json   用户验收状态、问题标签和修改意见
+```
+
+用户可以在网页里播放成片，并标记常见问题：
+
+- 开头钩子弱或进入主题太慢。
+- 字幕遮挡、太小、错字或节奏不对。
+- 画面裁切、商品/角色展示不清晰。
+- 声音太小、BGM 压人声或底噪明显。
+- 节奏拖沓或剪太碎。
+
+`summarize_review_feedback` 会读取 timeline 和成片审核日志，写出 `analysis/review_experience_candidates.md`。这一步只生成候选经验，不会默认写入全局 skill；只有用户确认候选规则可复用后，agent 才会调用 `record_experience` 或 `summarize_review_feedback(record_confirmed=true)` 沉淀到 `~/.video-agent/skills/_learned/`。
 
 ## 剪辑经验沉淀
 
@@ -212,6 +232,7 @@ python tests/test_smoke.py
 - 模块导入和工具 schema/handler 对齐
 - skill 加载和 learned skill 写入
 - HTML timeline 审核页生成
+- HTML 成片审核页和审核反馈候选生成
 - timeline 校验
 - ffmpeg 端到端渲染
 - 质检报告

@@ -112,6 +112,12 @@ def _review_timeline(**kw):
                            kw.get("open_browser", True))
 
 
+def _review_render(**kw):
+    from action.review import review_render
+    return review_render(kw["path"], kw.get("qc_report", ""),
+                         kw.get("open_browser", True))
+
+
 def _qc(**kw):
     from action.qc import qc_check
     return qc_check(kw["path"], kw.get("sample_frames", 4))
@@ -132,6 +138,18 @@ def _record_experience(**kw):
         kw.get("tags"),
     )
     SKILLS.reload()
+    return result
+
+
+def _summarize_review_feedback(**kw):
+    from action.review import summarize_review_feedback
+    result = summarize_review_feedback(
+        kw.get("paths"),
+        kw.get("scenario", "general"),
+        kw.get("record_confirmed", False),
+    )
+    if kw.get("record_confirmed"):
+        SKILLS.reload()
     return result
 
 
@@ -156,7 +174,9 @@ TOOL_HANDLERS = {
     "validate_timeline": _validate_timeline,
     "review_timeline":  _review_timeline,
     "render_timeline":  _render,
+    "review_render":    _review_render,
     "qc_check":         _qc,
+    "summarize_review_feedback": _summarize_review_feedback,
 }
 
 TOOLS = [
@@ -278,6 +298,17 @@ TOOLS = [
         "In interactive mode the human may be asked to approve first.",
      "input_schema": {"type": "object", "properties": {
          "path": {"type": "string"}, "background": {"type": "boolean"}}}},
+    {"name": "review_render", "description":
+        "Generate a local HTML review page for a rendered video. The page plays the "
+        "output, shows the QC report, lets the user mark issues and notes, and saves "
+        "render_review_log.json for later experience learning. Use this after qc_check "
+        "before final delivery unless the user explicitly skips review.",
+     "input_schema": {"type": "object", "properties": {
+         "path": {"type": "string"},
+         "qc_report": {"type": "string"},
+         "open_browser": {"type": "boolean",
+                          "description": "Open the review URL in the default browser."}},
+         "required": ["path"]}},
     {"name": "qc_check", "description":
         "Quality-check a rendered video: duration/loudness/black-frame detection + "
         "sample frames saved to analysis/frames/. Follow up with watch_video on the "
@@ -285,4 +316,15 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "path": {"type": "string"}, "sample_frames": {"type": "integer"}},
          "required": ["path"]}},
+    {"name": "summarize_review_feedback", "description":
+        "Summarize timeline/render review logs into reusable lesson candidates. This "
+        "does not write learned skills unless record_confirmed=true, which should only "
+        "be used after the user explicitly confirms the lessons are reusable.",
+     "input_schema": {"type": "object", "properties": {
+         "paths": {"type": "array", "items": {"type": "string"},
+                   "description": "Optional review log paths. Defaults to all review logs under review/."},
+         "scenario": {"type": "string",
+                      "description": "Scenario for the learned skill, e.g. ecommerce-clip."},
+         "record_confirmed": {"type": "boolean",
+                              "description": "Persist candidates via record_experience after user confirmation."}}}},
 ]
