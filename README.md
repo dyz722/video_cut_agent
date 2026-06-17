@@ -29,6 +29,8 @@ python -m pip install git+https://github.com/dyz722/video_cut_agent.git
 安装后可直接使用：
 
 ```bash
+veoai
+veoai --help
 video-agent --help
 video-cut-agent --help
 ```
@@ -50,7 +52,17 @@ python -m pip install -e .
 - 可用的 Anthropic 兼容模型 API
 - DashScope API key，用于 ASR、视觉理解和 TTS
 
-首次运行时会提示输入必需配置，也可以提前创建 `.env`：
+首次运行 `veoai` 时，如果还没有配置主模型，会进入快速配置流程：
+
+```text
+[主模型配置] 三方 URL/Base URL (回车使用 Anthropic 官方):
+[主模型配置] API key (必填):
+[主模型配置] 模型 ID (当前 claude-sonnet-4-6, 回车保留):
+```
+
+主模型 API 采用 Anthropic-compatible 接口。你可以直接使用 Anthropic 官方，也可以输入三方兼容服务的 Base URL、key 和模型 ID。DashScope key 可先跳过，等需要转写、视觉理解或 TTS 时再配置。
+
+也可以提前创建 `.env`：
 
 ```bash
 ANTHROPIC_API_KEY=
@@ -65,7 +77,7 @@ DASHSCOPE_API_KEY=
 
 可选环境变量：
 
-- `VIDEO_AGENT_WORKSPACE`：项目工作区根目录，默认是当前目录下的 `workspace/`
+- `VIDEO_AGENT_WORKSPACE`：项目工作区根目录，默认是启动 `veoai` 时所在目录
 - `VIDEO_AGENT_HOME`：用户数据目录，默认 `~/.video-agent`
 - `VIDEO_AGENT_LEARNED_SKILLS_DIR`：自动沉淀 skill 的保存目录
 - `VIDEO_AGENT_ENV`：配置文件路径
@@ -75,6 +87,22 @@ DASHSCOPE_API_KEY=
 交互模式：
 
 ```bash
+veoai
+```
+
+`veoai` 会把你启动命令时所在的目录作为当前项目工作目录。例如：
+
+```bash
+cd ~/Videos/my-live-project
+veoai
+```
+
+此时 `materials/`、`analysis/`、`timeline*.json`、`output/` 都会创建在 `~/Videos/my-live-project/` 下。
+
+也可以指定子项目目录和素材：
+
+```bash
+veoai demo --materials ~/Videos/source/
 video-agent demo --materials ~/Videos/source/
 ```
 
@@ -87,16 +115,24 @@ video-agent demo --materials ~/Videos/source/
 批处理模式：
 
 ```bash
-video-agent demo \
+veoai demo \
   --materials ~/Videos/source/ \
   --batch "把这场直播切出 10 条带货短视频，每条给出成片路径和质检结论" \
   --auto
 ```
 
+交互模式内置命令：
+
+- `/model`：切换主模型的 Base URL、API key 和模型 ID，并立即用于后续 agent loop。
+- `/todos`：查看当前剪辑计划。
+- `/bg`：查看后台转写或渲染任务。
+- `/compact`：手动压缩上下文。
+- `/quit`：退出。
+
 项目文件会放在：
 
 ```text
-workspace/<project>/
+<当前目录或指定项目目录>/
   materials/      原始素材软链接
   analysis/       转写、场景检测、抽帧等感知产物
   timeline*.json  剪辑决策清单
@@ -131,7 +167,7 @@ workspace/<project>/
 ~/.video-agent/skills/_learned/
 ```
 
-之后处理相似任务时，agent 会在可用 skills 列表中看到这些经验，并与基础赛道 skill 一起加载。经验沉淀只保存可复用剪辑判断，不应保存密钥、客户隐私、原始转写大段文本或私有素材文件名。
+之后处理相似任务时，agent 会在可用 skills 列表中看到这些经验，并与基础赛道 skill 一起加载。经验沉淀是全局的，不跟随当前项目目录变化；它只保存可复用剪辑判断，不应保存密钥、客户隐私、原始转写大段文本或私有素材文件名。
 
 ## 内置 Skills
 

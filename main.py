@@ -3,8 +3,9 @@
 video-agent CLI
 
 交互模式:
-    python main.py <project>                      # REPL, timeline 渲染前人工审批
-    python main.py <project> --materials ~/视频/   # 把素材链接进项目 materials/
+    veoai                                      # REPL, 使用当前目录作为工作目录
+    veoai <project>                            # 使用当前目录下的 project/ 作为工作目录
+    veoai <project> --materials ~/视频/         # 把素材链接进项目 materials/
 
 批处理模式:
     python main.py <project> --batch "把这场直播切出10条带货短视频" --auto
@@ -43,13 +44,13 @@ def repl():
     from agent.background import BG
     from agent.compact import auto_compact
 
-    print(f"video-agent | project: {config.PROJECT_DIR.name} | "
+    print(f"veoai | project: {config.PROJECT_DIR.name} | "
           f"model: {config.main_model()}")
-    print("commands: /todos /bg /compact /quit\n")
+    print("commands: /model /todos /bg /compact /quit\n")
     history = []
     while True:
         try:
-            query = input("\033[36mvideo-agent >> \033[0m")
+            query = input("\033[36mveoai >> \033[0m")
         except (EOFError, KeyboardInterrupt):
             break
         q = query.strip()
@@ -61,6 +62,10 @@ def repl():
             print(TODO.render()); continue
         if q == "/bg":
             print(BG.check()); continue
+        if q == "/model":
+            config.configure_main_model(force=True)
+            print(f"[model] current: {config.main_model()}")
+            continue
         if q == "/compact":
             if history:
                 history[:] = auto_compact(history)
@@ -94,8 +99,9 @@ def batch(task: str):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="video-agent: 剪辑 agent")
-    ap.add_argument("project", help="项目名 (workspace/<project>/)")
+    ap = argparse.ArgumentParser(description="veoai: 视频剪辑 agent")
+    ap.add_argument("project", nargs="?", default=".",
+                    help="项目目录, 默认当前目录; 相对路径基于启动 veoai 的目录")
     ap.add_argument("--materials", help="素材文件/目录, 链接进项目 materials/")
     ap.add_argument("--batch", help="批处理任务描述, 非交互执行")
     ap.add_argument("--auto", action="store_true",

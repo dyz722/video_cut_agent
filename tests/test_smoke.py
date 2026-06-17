@@ -14,6 +14,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,6 +55,8 @@ def main():
     check("tool schema/handler 一一对应",
           {t["name"] for t in TOOLS} == set(TOOL_HANDLERS.keys()),
           str({t["name"] for t in TOOLS} ^ set(TOOL_HANDLERS.keys())))
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    check("veoai CLI entry registered", 'veoai = "main:main"' in pyproject)
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)
@@ -72,6 +75,7 @@ def main():
     print("[3] synthetic materials")
     proj = config.set_project("_smoke")
     mats = proj / "materials"
+    external_dir = Path(tempfile.mkdtemp(prefix="video_agent_smoke_external_"))
     sh(f'ffmpeg -y -f lavfi -i "testsrc2=duration=6:size=640x360:rate=30" '
        f'-f lavfi -i "sine=frequency=440:duration=6" '
        f'-c:v libx264 -c:a aac -shortest "{mats}/a.mp4"')
@@ -84,8 +88,13 @@ def main():
        f'-c:a libmp3lame "{mats}/bgm.mp3"')  # 短 BGM, 测 stream_loop
     sh(f'ffmpeg -y -f lavfi -i "color=red@0.6:size=600x120:duration=1" '
        f'-frames:v 1 "{mats}/banner.png"')
+    sh(f'ffmpeg -y -f lavfi -i "testsrc2=duration=1:size=320x180:rate=15" '
+       f'-an -c:v libx264 "{external_dir}/external.mp4"')
+    (mats / "external_link.mp4").symlink_to(external_dir / "external.mp4")
     check("materials generated", all((mats / f).exists() for f in
           ("a.mp4", "b.mp4", "noaudio.mp4", "bgm.mp3", "banner.png")))
+    check("symlinked materials are readable",
+          "duration:" in perception.probe.probe_media("materials/external_link.mp4"))
 
     print("[4] timeline validation")
     tl = {
@@ -155,6 +164,7 @@ def main():
     print("\n" + q)
 
     print(f"\n==== {PASS} passed, {FAIL} failed ====")
+    shutil.rmtree(external_dir, ignore_errors=True)
     if FAIL == 0:
         shutil.rmtree(proj, ignore_errors=True)
     return 1 if FAIL else 0
