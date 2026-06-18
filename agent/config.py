@@ -14,6 +14,8 @@ from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from .model_client import OpenAICompatClient
+
 ROOT = Path(__file__).resolve().parent.parent
 USER_DATA_DIR = Path(os.getenv("VIDEO_AGENT_HOME", "~/.video-agent")).expanduser()
 ENV_PATH = Path(os.getenv(
@@ -34,7 +36,8 @@ PROJECT_DIR: Path = WORKSPACE_ROOT
 # -- 运行模式 --
 AUTO_MODE = False          # True: 渲染不需要人审 (批处理默认)
 TOKEN_THRESHOLD = 100000
-DEFAULT_MODEL_ID = "claude-sonnet-4-6"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
+DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 DASHSCOPE_DESC = "阿里 DashScope API key (fun-asr / qwen-vl / cosyvoice)"
 
@@ -69,25 +72,69 @@ def _write_env_values(values: dict[str, str]):
 
 
 def reset_client():
-    """Drop cached Anthropic-compatible client after model config changes."""
+    """Drop cached main model client after model config changes."""
     global _client
     _client = None
 
 
+def main_model_protocol() -> str:
+    proto = os.getenv("MODEL_API_PROTOCOL", "").strip().lower()
+    if proto in ("openai", "openai-compatible", "chat-completions"):
+        return "openai"
+    if proto in ("anthropic", "anthropic-compatible", "messages"):
+        return "anthropic"
+    if os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
+        return "openai"
+    return "anthropic"
+
+
+def _default_model_for(protocol: str) -> str:
+    return DEFAULT_OPENAI_MODEL if protocol == "openai" else DEFAULT_ANTHROPIC_MODEL
+
+
+def _prompt_choice(prompt: str, current: str, choices: dict[str, str]) -> str:
+    labels = " / ".join(f"{k}={v}" for k, v in choices.items())
+    value = input(f"{prompt} ({labels}, 当前 {current}, 回车保留): ").strip().lower()
+    if not value:
+        return current
+    return choices.get(value, value)
+
+
 def configure_main_model(force: bool = False):
-    """Prompt for Anthropic-compatible URL/key/model and persist it."""
+    """Prompt for main model protocol/url/key/model and persist it."""
     load_dotenv(ENV_PATH, override=True)
-    current_key = os.getenv("ANTHROPIC_API_KEY", "")
-    current_url = os.getenv("ANTHROPIC_BASE_URL", "")
-    current_model = os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
+    current_protocol = main_model_protocol()
+    protocol = current_protocol
+    current_key = os.getenv("OPENAI_API_KEY" if protocol == "openai" else "ANTHROPIC_API_KEY", "")
     if not force and current_key:
         return
 
-    print("\n[主模型配置] 支持 Anthropic 官方或三方 Anthropic-compatible API")
-    if current_url:
-        prompt_url = f"[主模型配置] 三方 URL/Base URL (当前 {current_url}, 回车保留): "
+    print("\n[主模型配置] 支持 Anthropic-compatible 和 OpenAI-compatible API")
+    protocol = _prompt_choice(
+        "[主模型配置] 接口协议",
+        current_protocol,
+        {"1": "anthropic", "2": "openai", "anthropic": "anthropic", "openai": "openai"},
+    )
+    if protocol not in ("anthropic", "openai"):
+        raise SystemExit(f"不支持的主模型协议: {protocol}")
+
+    if protocol == "openai":
+        key_name, url_name = "OPENAI_API_KEY", "OPENAI_BASE_URL"
+        default_url = "https://api.openai.com/v1"
+        url_label = "OpenAI-compatible Base URL"
     else:
-        prompt_url = "[主模型配置] 三方 URL/Base URL (回车使用 Anthropic 官方): "
+        key_name, url_name = "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"
+        default_url = ""
+        url_label = "Anthropic-compatible Base URL"
+
+    current_key = os.getenv(key_name, "")
+    current_url = os.getenv(url_name, default_url)
+    current_model = (os.getenv("MODEL_ID", _default_model_for(protocol))
+                     if protocol == current_protocol else _default_model_for(protocol))
+    if current_url:
+        prompt_url = f"[主模型配置] {url_label} (当前 {current_url}, 回车保留): "
+    else:
+        prompt_url = f"[主模型配置] {url_label} (回车使用官方默认): "
     base_url = input(prompt_url).strip()
     if not base_url:
         base_url = current_url
@@ -101,22 +148,25 @@ def configure_main_model(force: bool = False):
 
     model_id = input(f"[主模型配置] 模型 ID (当前 {current_model}, 回车保留): ").strip()
     if not model_id:
-        model_id = current_model or DEFAULT_MODEL_ID
+        model_id = current_model or _default_model_for(protocol)
 
-    os.environ["ANTHROPIC_API_KEY"] = api_key
+    os.environ["MODEL_API_PROTOCOL"] = protocol
+    os.environ[key_name] = api_key
     os.environ["MODEL_ID"] = model_id
     if base_url:
-        os.environ["ANTHROPIC_BASE_URL"] = base_url
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        os.environ[url_name] = base_url
     else:
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
+        os.environ.pop(url_name, None)
+    if protocol == "anthropic" and base_url:
+        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
     _write_env_values({
-        "ANTHROPIC_BASE_URL": base_url,
-        "ANTHROPIC_API_KEY": api_key,
+        "MODEL_API_PROTOCOL": protocol,
+        url_name: base_url,
+        key_name: api_key,
         "MODEL_ID": model_id,
     })
     reset_client()
-    print(f"[主模型配置] 已保存到 {ENV_PATH}; 当前模型: {model_id}")
+    print(f"[主模型配置] 已保存到 {ENV_PATH}; 当前协议: {protocol}; 当前模型: {model_id}")
 
 
 def ensure_config():
@@ -138,7 +188,7 @@ def ensure_config():
 
 # -- 模型选型 (model-choose) --
 def main_model() -> str:
-    return os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
+    return os.getenv("MODEL_ID", _default_model_for(main_model_protocol()))
 
 
 def vl_model() -> str:
@@ -160,10 +210,18 @@ def tts_model() -> str:
 _client = None
 
 
-def client() -> Anthropic:
+def client():
     global _client
     if _client is None:
-        _client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL") or None)
+        protocol = main_model_protocol()
+        if protocol == "openai":
+            key = os.getenv("OPENAI_API_KEY")
+            if not key:
+                raise RuntimeError("OPENAI_API_KEY is required for OpenAI-compatible protocol.")
+            _client = OpenAICompatClient(os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+                                         key)
+        else:
+            _client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL") or None)
     return _client
 
 

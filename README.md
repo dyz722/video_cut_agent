@@ -48,26 +48,43 @@ python -m pip install -e .
 
 - Python 3.10+
 - `ffmpeg` 和 `ffprobe`
-- 可用的 Anthropic 兼容模型 API
+- 可用的主模型 API：Anthropic-compatible 或 OpenAI-compatible
 - DashScope API key，用于 ASR、视觉理解和 TTS
 
 首次运行 `veoai` 时，如果还没有配置主模型，会进入快速配置流程：
 
 ```text
-[主模型配置] 三方 URL/Base URL (回车使用 Anthropic 官方):
+[主模型配置] 接口协议 (1=anthropic / 2=openai, 当前 anthropic, 回车保留):
+[主模型配置] Base URL (回车使用所选协议官方默认):
 [主模型配置] API key (必填):
-[主模型配置] 模型 ID (当前 claude-sonnet-4-6, 回车保留):
+[主模型配置] 模型 ID (回车保留默认或当前值):
 ```
 
-主模型 API 采用 Anthropic-compatible 接口。你可以直接使用 Anthropic 官方，也可以输入三方兼容服务的 Base URL、key 和模型 ID。DashScope key 可先跳过，等需要转写、视觉理解或 TTS 时再配置。
+主模型支持两类主流接口协议：
+
+- `anthropic`：Anthropic Messages API 或三方 Anthropic-compatible 服务。
+- `openai`：OpenAI Chat Completions API 或三方 OpenAI-compatible `/v1/chat/completions` 服务。
+
+选择协议后，输入对应的 Base URL、API key 和模型 ID 即可。DashScope key 可先跳过，等需要转写、视觉理解或 TTS 时再配置。
 
 也可以提前创建 `.env`：
 
 ```bash
+# anthropic 或 openai
+MODEL_API_PROTOCOL=anthropic
+
+# Anthropic-compatible
 ANTHROPIC_API_KEY=
-DASHSCOPE_API_KEY=
 # ANTHROPIC_BASE_URL=
 # MODEL_ID=claude-sonnet-4-6
+
+# OpenAI-compatible
+# MODEL_API_PROTOCOL=openai
+# OPENAI_API_KEY=
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# MODEL_ID=gpt-4o
+
+DASHSCOPE_API_KEY=
 # VL_MODEL=qwen3-vl-plus
 # ASR_FILE_MODEL=fun-asr
 # ASR_REALTIME_MODEL=fun-asr-realtime

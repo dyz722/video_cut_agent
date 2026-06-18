@@ -43,6 +43,11 @@ def main():
     from agent.todo import TodoManager
     from agent.skills import SkillLoader
     from agent.experience import record_experience
+    from agent.model_client import (
+        ToolUseBlock,
+        anthropic_messages_to_openai,
+        anthropic_tools_to_openai,
+    )
     import agent.loop  # noqa
     import agent.subagent  # noqa
     from agent.tools import TOOLS, TOOL_HANDLERS
@@ -61,6 +66,28 @@ def main():
     check("legacy CLI aliases removed",
           'video-agent = "main:main"' not in pyproject
           and 'video-cut-agent = "main:main"' not in pyproject)
+    openai_tools = anthropic_tools_to_openai([{
+        "name": "demo_tool",
+        "description": "demo",
+        "input_schema": {"type": "object", "properties": {"x": {"type": "string"}},
+                         "required": ["x"]},
+    }])
+    check("OpenAI-compatible tool schema conversion",
+          openai_tools[0]["function"]["name"] == "demo_tool"
+          and openai_tools[0]["function"]["parameters"]["required"] == ["x"])
+    openai_msgs = anthropic_messages_to_openai([
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [
+            ToolUseBlock(type="tool_use", id="call_1", name="demo_tool", input={"x": "1"}),
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "ok"},
+        ]},
+    ], system="sys")
+    check("OpenAI-compatible message conversion",
+          openai_msgs[0]["role"] == "system"
+          and openai_msgs[2]["tool_calls"][0]["function"]["name"] == "demo_tool"
+          and openai_msgs[3]["role"] == "tool")
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)
