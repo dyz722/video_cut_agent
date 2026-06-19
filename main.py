@@ -6,6 +6,7 @@ video-agent CLI
     veoai                                      # REPL, 使用当前目录作为工作目录
     veoai <project>                            # 使用当前目录下的 project/ 作为工作目录
     veoai <project> --materials ~/视频/         # 把素材链接进项目 materials/
+    veoai update                               # 从 GitHub 更新到最新版本
 
 批处理模式:
     python main.py <project> --batch "把这场直播切出10条带货短视频" --auto
@@ -13,12 +14,15 @@ video-agent CLI
 """
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent import config  # noqa: E402
+
+DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
 
 
 def link_materials(src: str):
@@ -98,7 +102,40 @@ def batch(task: str):
                 print(block.text)
 
 
+def update_self(repo: str = DEFAULT_REPO_URL, dry_run: bool = False) -> int:
+    """Upgrade the installed package from GitHub using the current Python."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--force-reinstall",
+        f"git+{repo}",
+    ]
+    print("[update] 将执行:")
+    print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
+    if dry_run:
+        return 0
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        print("[update] veoai 已更新到 GitHub 最新版本。")
+    else:
+        print("[update] 更新失败。可尝试手动运行上面的命令。")
+    return result.returncode
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "update":
+        up = argparse.ArgumentParser(description="Update veoai from GitHub.")
+        up.add_argument("--repo", default=DEFAULT_REPO_URL,
+                        help="Git repository URL to install from.")
+        up.add_argument("--dry-run", action="store_true",
+                        help="Print the update command without running it.")
+        args = up.parse_args(argv[1:])
+        return update_self(args.repo, args.dry_run)
+
     ap = argparse.ArgumentParser(description="veoai: 视频剪辑 agent")
     ap.add_argument("project", nargs="?", default=".",
                     help="项目目录, 默认当前目录; 相对路径基于启动 veoai 的目录")
@@ -118,7 +155,8 @@ def main(argv=None):
         batch(args.batch)
     else:
         repl()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

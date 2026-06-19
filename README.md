@@ -34,6 +34,18 @@ veoai
 veoai --help
 ```
 
+后续更新到 GitHub 最新版本：
+
+```bash
+veoai update
+```
+
+如果只是想查看将执行的更新命令：
+
+```bash
+veoai update --dry-run
+```
+
 ### 本地开发安装
 
 ```bash
@@ -41,6 +53,8 @@ git clone https://github.com/dyz722/video_cut_agent.git
 cd video_cut_agent
 python -m pip install -e .
 ```
+
+本地开发仓库建议用 `git pull` 更新源码；普通用户通过 `veoai update` 更新安装版。
 
 ## 依赖
 

@@ -50,6 +50,7 @@ def main():
     )
     import agent.loop  # noqa
     import agent.subagent  # noqa
+    import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
     from action import timeline as tl_mod
@@ -88,6 +89,7 @@ def main():
           openai_msgs[0]["role"] == "system"
           and openai_msgs[2]["tool_calls"][0]["function"]["name"] == "demo_tool"
           and openai_msgs[3]["role"] == "tool")
+    check("veoai update dry-run", cli.main(["update", "--dry-run"]) == 0)
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)
