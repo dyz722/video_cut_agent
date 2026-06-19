@@ -95,6 +95,7 @@ def main():
     err = cli.format_cli_error(RuntimeError(
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
+    check("status context usable", hasattr(agent.loop, "status"))
     check("slash command completion /m", cli.complete_slash_command("/m", 0) == "/model")
     slash_matches = []
     i = 0

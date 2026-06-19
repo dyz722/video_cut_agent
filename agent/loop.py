@@ -5,6 +5,10 @@ agent_loop: while + stop_reason。
 工具执行后: todo nag 提醒。
 """
 
+from contextlib import contextmanager
+import itertools
+import sys
+import threading
 import time
 
 from . import config
@@ -59,6 +63,39 @@ def build_system() -> str:
                                   skills=SKILLS.descriptions())
 
 
+def _status_enabled() -> bool:
+    return sys.stdout.isatty()
+
+
+@contextmanager
+def status(title: str):
+    """Show a lightweight live status while blocking work is running."""
+    if not _status_enabled():
+        print(f"[status] {title}")
+        yield
+        return
+
+    done = threading.Event()
+
+    def run():
+        for frame in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+            if done.is_set():
+                break
+            sys.stdout.write(f"\r\033[2K{frame} {title}")
+            sys.stdout.flush()
+            time.sleep(0.12)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join(timeout=0.3)
+        sys.stdout.write(f"\r\033[2K✓ {title}\n")
+        sys.stdout.flush()
+
+
 def agent_loop(messages: list, verbose: bool = True):
     rounds_without_todo = 0
     while True:
@@ -72,17 +109,20 @@ def agent_loop(messages: list, verbose: bool = True):
                             f"{n['result']}" for n in notifs)
             messages.append({"role": "user",
                              "content": f"<background-results>\n{txt}\n</background-results>"})
-        response = config.client().messages.create(
-            model=config.main_model(), system=build_system(),
-            messages=messages, tools=TOOLS, max_tokens=8000)
+        with status(f"thinking with {config.main_model()} ({config.main_model_protocol()})"):
+            response = config.client().messages.create(
+                model=config.main_model(), system=build_system(),
+                messages=messages, tools=TOOLS, max_tokens=8000)
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
             # 后台还有活且 agent 停了 -> 批处理模式下等通知再继续
             if config.AUTO_MODE and BG.has_running():
-                print("[waiting for background tasks...]")
+                wait_title = "waiting for background tasks"
+                print(f"[{wait_title}]")
                 while BG.has_running() and BG.notifications.empty():
-                    time.sleep(2)
+                    with status(wait_title):
+                        time.sleep(2)
                 continue
             return
 
@@ -95,7 +135,8 @@ def agent_loop(messages: list, verbose: bool = True):
                     manual_compress = True
                 handler = TOOL_HANDLERS.get(block.name)
                 try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                    with status(f"running tool: {block.name}"):
+                        output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     output = f"Error: {type(e).__name__}: {e}"
                 if verbose:
