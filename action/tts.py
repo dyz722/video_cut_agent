@@ -6,13 +6,10 @@ instruction 必须中文且按官方格式, 例:
 """
 
 import base64
-import os
 
 import requests
 
 from agent import config
-
-TTS_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
 
 
 def synthesize(text: str, output: str, voice: str = "longanyang",
@@ -28,9 +25,10 @@ def synthesize(text: str, output: str, voice: str = "longanyang",
     if instruction:
         payload["input"]["instruction"] = instruction
 
+    api_key, _ = config.apply_dashscope_config()
     r = requests.post(
-        TTS_URL, json=payload, timeout=120,
-        headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}",
+        config.dashscope_tts_url(), json=payload, timeout=120,
+        headers={"Authorization": f"Bearer {api_key}",
                  "Content-Type": "application/json"})
     ctype = r.headers.get("Content-Type", "")
     if r.status_code != 200:

@@ -4,7 +4,6 @@ watch_video: 从 [start,end] 抽帧 -> qwen3-vl-plus 多帧视频理解 -> 文�
 帧落盘 analysis/frames/ 方便复查。
 """
 
-import os
 import subprocess
 import time
 
@@ -47,7 +46,7 @@ def watch_video(path: str, start: float, end: float, question: str) -> str:
     if not frames:
         return "Error: no frames extracted"
 
-    dashscope.api_key = os.environ["DASHSCOPE_API_KEY"]
+    config.apply_dashscope_config()
     messages = [{"role": "user", "content": [
         {"video": [f"file://{f}" for f in frames]},
         {"text": (f"这是视频 {fp.name} 第 {start:.1f}s-{end:.1f}s 的等间隔抽帧"

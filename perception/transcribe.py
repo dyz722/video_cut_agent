@@ -9,7 +9,6 @@ transcribe: DashScope fun-asr 语音转写, 句级时间戳。
 """
 
 import json
-import os
 import subprocess
 
 from agent import config
@@ -27,7 +26,7 @@ def _recognize_local(wav_path) -> list:
     import dashscope
     from dashscope.audio.asr import Recognition
 
-    dashscope.api_key = os.environ["DASHSCOPE_API_KEY"]
+    config.apply_dashscope_config()
     rec = Recognition(model=config.asr_realtime_model(), format="wav",
                       sample_rate=16000, callback=None)
     result = rec.call(str(wav_path))
@@ -51,7 +50,7 @@ def _recognize_url(url: str) -> list:
     import requests
     from dashscope.audio.asr import Transcription
 
-    dashscope.api_key = os.environ["DASHSCOPE_API_KEY"]
+    config.apply_dashscope_config()
     task = Transcription.async_call(model=config.asr_file_model(), file_urls=[url])
     result = Transcription.wait(task=task.output.task_id)
     if result.status_code != 200:

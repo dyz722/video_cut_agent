@@ -28,7 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import config  # noqa: E402
 
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
-SLASH_COMMANDS = ["/model", "/todos", "/bg", "/compact", "/logs", "/verbose", "/help", "/quit"]
+SLASH_COMMANDS = [
+    "/model", "/dashscope", "/todos", "/bg", "/compact",
+    "/logs", "/verbose", "/help", "/quit",
+]
 _READLINE = None
 _HISTORY_REGISTERED = False
 
@@ -92,6 +95,7 @@ def welcome_screen() -> str:
         "",
         "Shortcuts",
         "/model   switch model provider",
+        "/dashscope switch cn/intl DashScope",
         "/todos   show current plan",
         "/bg      check background jobs",
         "/compact compress context",
@@ -116,6 +120,7 @@ def command_help() -> str:
     return "\n".join([
         "commands:",
         "  /model     切换主模型协议、Base URL、API key 和模型 ID",
+        "  /dashscope 配置/切换 DashScope 国内或海外 endpoint/key",
         "  /todos     查看当前剪辑计划",
         "  /bg        查看后台转写/渲染任务",
         "  /compact   手动压缩上下文",
@@ -344,6 +349,11 @@ def repl():
         if q == "/model":
             config.configure_main_model(force=True)
             print(f"[model] current: {config.main_model()}")
+            continue
+        if q == "/dashscope":
+            config.configure_dashscope(force=True)
+            print(f"[dashscope] region: {config.dashscope_region()} | "
+                  f"base_url: {config.dashscope_base_url()}")
             continue
         if q == "/compact":
             if history:

@@ -81,7 +81,7 @@ python -m pip install -e .
 - `anthropic`：Anthropic Messages API 或三方 Anthropic-compatible 服务。
 - `openai`：OpenAI Chat Completions API 或三方 OpenAI-compatible `/v1/chat/completions` 服务。
 
-选择协议后，输入对应的 Base URL、API key 和模型 ID 即可。DashScope key 可先跳过，等需要转写、视觉理解或 TTS 时再配置。
+选择协议后，输入对应的 Base URL、API key 和模型 ID 即可。DashScope key 可先跳过，等需要转写、视觉理解或 TTS 时再配置。DashScope 支持国内/海外两套 endpoint 和 key，可运行 `/dashscope` 切换。
 
 也可以提前创建 `.env`：
 
@@ -101,6 +101,11 @@ ANTHROPIC_API_KEY=
 # MODEL_ID=gpt-4o
 
 DASHSCOPE_API_KEY=
+# DASHSCOPE_REGION=cn
+# DASHSCOPE_API_KEY_CN=
+# DASHSCOPE_API_KEY_INTL=
+# DASHSCOPE_BASE_URL_CN=https://dashscope.aliyuncs.com/api/v1
+# DASHSCOPE_BASE_URL_INTL=https://dashscope-intl.aliyuncs.com/api/v1
 # VL_MODEL=qwen3-vl-plus
 # ASR_FILE_MODEL=fun-asr
 # ASR_REALTIME_MODEL=fun-asr-realtime
@@ -155,6 +160,7 @@ veoai demo \
 交互模式内置命令：
 
 - `/model`：切换主模型协议、Base URL、API key 和模型 ID，并立即用于后续 agent loop。
+- `/dashscope`：配置/切换 DashScope 国内或海外 endpoint/key，用于 ASR、视觉理解和 TTS。
 - `/todos`：查看当前剪辑计划。
 - `/bg`：查看后台转写或渲染任务。
 - `/compact`：手动压缩上下文。

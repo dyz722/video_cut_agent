@@ -11,6 +11,7 @@
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,24 @@ def main():
           openai_msgs[0]["role"] == "system"
           and openai_msgs[2]["tool_calls"][0]["function"]["name"] == "demo_tool"
           and openai_msgs[3]["role"] == "tool")
+    old_dash_env = {k: os.environ.get(k) for k in (
+        "DASHSCOPE_REGION", "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY_CN",
+        "DASHSCOPE_API_KEY_INTL", "DASHSCOPE_BASE_URL_CN", "DASHSCOPE_BASE_URL_INTL")}
+    try:
+        os.environ["DASHSCOPE_REGION"] = "intl"
+        os.environ["DASHSCOPE_API_KEY_INTL"] = "intl-key"
+        os.environ["DASHSCOPE_BASE_URL_INTL"] = "https://dashscope-intl.example/api/v1"
+        check("DashScope intl key selected", config.dashscope_api_key() == "intl-key")
+        check("DashScope intl base URL selected",
+              config.dashscope_base_url() == "https://dashscope-intl.example/api/v1")
+        check("DashScope TTS URL derived",
+              config.dashscope_tts_url().endswith("/services/audio/tts/SpeechSynthesizer"))
+    finally:
+        for k, v in old_dash_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
     check("veoai update dry-run", cli.main(["update", "--dry-run"]) == 0)
     splash = cli.welcome_screen()
     check("welcome screen renders", "Welcome back!" in splash and "Shortcuts" in splash)
@@ -117,7 +136,7 @@ def main():
         slash_matches.append(item)
         i += 1
     check("slash command completion lists commands",
-          "/model" in slash_matches and "/quit" in slash_matches)
+          "/model" in slash_matches and "/dashscope" in slash_matches and "/quit" in slash_matches)
     check("prompt status includes project",
           str(cli.config.PROJECT_DIR) in cli.prompt_status())
     check("prompt session optional",

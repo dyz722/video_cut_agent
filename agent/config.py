@@ -40,6 +40,8 @@ DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
 DASHSCOPE_DESC = "阿里 DashScope API key (fun-asr / qwen-vl / cosyvoice)"
+DASHSCOPE_CN_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
+DASHSCOPE_INTL_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 
 
 def _mask(value: str) -> str:
@@ -98,6 +100,106 @@ def _prompt_choice(prompt: str, current: str, choices: dict[str, str]) -> str:
     if not value:
         return current
     return choices.get(value, value)
+
+
+def dashscope_region() -> str:
+    region = os.getenv("DASHSCOPE_REGION", "cn").strip().lower()
+    if region in ("intl", "international", "overseas", "global", "sg", "singapore"):
+        return "intl"
+    return "cn"
+
+
+def _dashscope_key_name(region: str) -> str:
+    return "DASHSCOPE_API_KEY_INTL" if region == "intl" else "DASHSCOPE_API_KEY_CN"
+
+
+def _dashscope_base_name(region: str) -> str:
+    return "DASHSCOPE_BASE_URL_INTL" if region == "intl" else "DASHSCOPE_BASE_URL_CN"
+
+
+def _dashscope_default_base(region: str) -> str:
+    return DASHSCOPE_INTL_BASE_URL if region == "intl" else DASHSCOPE_CN_BASE_URL
+
+
+def dashscope_api_key(region: str | None = None) -> str:
+    region = region or dashscope_region()
+    return (os.getenv(_dashscope_key_name(region))
+            or os.getenv("DASHSCOPE_API_KEY")
+            or "")
+
+
+def dashscope_base_url(region: str | None = None) -> str:
+    region = region or dashscope_region()
+    return os.getenv(_dashscope_base_name(region), _dashscope_default_base(region)).rstrip("/")
+
+
+def dashscope_tts_url(region: str | None = None) -> str:
+    return dashscope_base_url(region) + "/services/audio/tts/SpeechSynthesizer"
+
+
+def apply_dashscope_config(region: str | None = None) -> tuple[str, str]:
+    """Apply DashScope api_key/base URL to the dashscope SDK and return them."""
+    region = region or dashscope_region()
+    key = dashscope_api_key(region)
+    base_url = dashscope_base_url(region)
+    if not key:
+        raise RuntimeError(f"Missing DashScope API key for region '{region}'. "
+                           "Run /dashscope to configure it.")
+    os.environ["DASHSCOPE_API_KEY"] = key
+    try:
+        import dashscope
+        dashscope.api_key = key
+        # Native DashScope SDK uses this base URL for non-compatible APIs.
+        dashscope.base_http_api_url = base_url
+    except Exception:
+        pass
+    return key, base_url
+
+
+def configure_dashscope(force: bool = False):
+    """Prompt for domestic/international DashScope endpoints and keys."""
+    load_dotenv(ENV_PATH, override=True)
+    current_region = dashscope_region()
+    if not force and dashscope_api_key(current_region):
+        apply_dashscope_config(current_region)
+        return
+
+    print("\n[DashScope 配置] 支持国内/海外两套 endpoint 和 key")
+    region = _prompt_choice(
+        "[DashScope 配置] 当前网络环境",
+        current_region,
+        {"1": "cn", "2": "intl", "cn": "cn", "intl": "intl", "overseas": "intl"},
+    )
+    if region not in ("cn", "intl"):
+        raise SystemExit(f"不支持的 DashScope 区域: {region}")
+
+    values = {"DASHSCOPE_REGION": region}
+    for r, label in (("cn", "国内"), ("intl", "海外")):
+        base_name = _dashscope_base_name(r)
+        key_name = _dashscope_key_name(r)
+        current_base = os.getenv(base_name, _dashscope_default_base(r))
+        current_key = os.getenv(key_name, os.getenv("DASHSCOPE_API_KEY", ""))
+        base = input(f"[DashScope 配置] {label} Base URL "
+                     f"(当前 {current_base}, 回车保留): ").strip() or current_base
+        key_hint = f"当前 {_mask(current_key)}, 回车保留" if current_key else "回车跳过"
+        key = input(f"[DashScope 配置] {label} API key ({key_hint}): ").strip() or current_key
+        values[base_name] = base
+        if key:
+            values[key_name] = key
+
+    active_key = values.get(_dashscope_key_name(region)) or dashscope_api_key(region)
+    if active_key:
+        values["DASHSCOPE_API_KEY"] = active_key  # Backward-compatible active key.
+        os.environ["DASHSCOPE_API_KEY"] = active_key
+    for key, val in values.items():
+        os.environ[key] = val
+    _write_env_values(values)
+    if active_key:
+        apply_dashscope_config(region)
+        print(f"[DashScope 配置] 已保存到 {ENV_PATH}; 当前区域: {region}; "
+              f"Base URL: {dashscope_base_url(region)}")
+    else:
+        print("[DashScope 配置] 未配置当前区域 key；转写、视觉理解、TTS 暂不可用。")
 
 
 def configure_main_model(force: bool = False):
@@ -173,14 +275,7 @@ def ensure_config():
     """加载 .env; 缺少的 key 在 CLI 交互式询问并写回 .env。"""
     load_dotenv(ENV_PATH, override=True)
     configure_main_model(force=False)
-    if not os.getenv("DASHSCOPE_API_KEY"):
-        val = input(f"[配置] DASHSCOPE_API_KEY ({DASHSCOPE_DESC}, 回车可稍后配置): ").strip()
-        if val:
-            os.environ["DASHSCOPE_API_KEY"] = val
-            _write_env_values({"DASHSCOPE_API_KEY": val})
-            print(f"[配置] 已保存到 {ENV_PATH}")
-        else:
-            print("[配置] 已跳过 DashScope；转写、视觉理解、TTS 工具在配置前不可用。")
+    configure_dashscope(force=False)
     # Anthropic 兼容代理时清掉 AUTH_TOKEN 干扰 (同 learn-claude-code 模式)
     if os.getenv("ANTHROPIC_BASE_URL"):
         os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
