@@ -96,6 +96,17 @@ def main():
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
     check("status context usable", hasattr(agent.loop, "status"))
+    agent.loop.clear_tool_logs()
+    log_entry = agent.loop.record_tool_log("bash", {"command": "ls"}, "a\nb\n")
+    check("tool log records summary", "bash completed" in log_entry["summary"])
+    check("tool logs render summary", "bash:" in agent.loop.render_tool_logs())
+    check("tool logs render full", "output:" in agent.loop.render_tool_logs(full=True))
+    agent.loop.set_verbose_tools(True)
+    check("verbose toggle on", agent.loop.VERBOSE_TOOLS is True)
+    agent.loop.set_verbose_tools(False)
+    check("verbose toggle off", agent.loop.VERBOSE_TOOLS is False)
+    agent.loop.clear_tool_logs()
+    check("tool logs clear", "No tool logs" in agent.loop.render_tool_logs())
     check("slash command completion /m", cli.complete_slash_command("/m", 0) == "/model")
     slash_matches = []
     i = 0

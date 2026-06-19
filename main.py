@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import config  # noqa: E402
 
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
-SLASH_COMMANDS = ["/model", "/todos", "/bg", "/compact", "/help", "/quit"]
+SLASH_COMMANDS = ["/model", "/todos", "/bg", "/compact", "/logs", "/verbose", "/help", "/quit"]
 _READLINE = None
 _HISTORY_REGISTERED = False
 
@@ -95,6 +95,7 @@ def welcome_screen() -> str:
         "/todos   show current plan",
         "/bg      check background jobs",
         "/compact compress context",
+        "/logs    inspect hidden tool logs",
         "Tab      complete slash commands",
         "Up/Down  browse prompt history",
         "/quit    exit",
@@ -118,6 +119,10 @@ def command_help() -> str:
         "  /todos     查看当前剪辑计划",
         "  /bg        查看后台转写/渲染任务",
         "  /compact   手动压缩上下文",
+        "  /logs      查看最近工具调用摘要",
+        "  /logs full 展开最近工具输入/输出",
+        "  /logs clear 清空工具日志",
+        "  /verbose on|off 切换详细工具输出",
         "  /quit      退出",
         "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
         "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
@@ -281,6 +286,7 @@ def link_materials(src: str):
 
 def repl():
     from agent.loop import agent_loop
+    from agent import loop as loop_state
     from agent.todo import TODO
     from agent.background import BG
     from agent.compact import auto_compact
@@ -314,6 +320,27 @@ def repl():
             print(TODO.render()); continue
         if q == "/bg":
             print(BG.check()); continue
+        if q.startswith("/logs"):
+            parts = q.split()
+            if len(parts) > 1 and parts[1] == "clear":
+                loop_state.clear_tool_logs()
+                print("[logs] cleared")
+            else:
+                print(loop_state.render_tool_logs(full=(len(parts) > 1 and parts[1] == "full")))
+            continue
+        if q.startswith("/verbose"):
+            parts = q.split()
+            if len(parts) == 1:
+                print(f"[verbose] {'on' if loop_state.VERBOSE_TOOLS else 'off'}")
+            elif parts[1] in ("on", "true", "1"):
+                loop_state.set_verbose_tools(True)
+                print("[verbose] on")
+            elif parts[1] in ("off", "false", "0"):
+                loop_state.set_verbose_tools(False)
+                print("[verbose] off")
+            else:
+                print("usage: /verbose on|off")
+            continue
         if q == "/model":
             config.configure_main_model(force=True)
             print(f"[model] current: {config.main_model()}")

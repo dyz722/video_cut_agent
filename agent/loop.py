@@ -17,6 +17,10 @@ from .background import BG
 from .todo import TODO
 from .tools import TOOLS, TOOL_HANDLERS, SKILLS
 
+VERBOSE_TOOLS = False
+TOOL_LOGS = []
+MAX_TOOL_LOGS = 80
+
 SYSTEM_TEMPLATE = """You are a video editing agent (剪辑 agent) working in project workspace: {workdir}
 
 Workspace convention:
@@ -96,7 +100,76 @@ def status(title: str):
         sys.stdout.flush()
 
 
-def agent_loop(messages: list, verbose: bool = True):
+def _shorten(text: str, limit: int = 180) -> str:
+    text = str(text).replace("\n", " ").strip()
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def summarize_tool_result(name: str, input_data: dict, output: str) -> str:
+    output = str(output)
+    if name == "load_skill":
+        return f"loaded skill: {input_data.get('name', '-')}"
+    if name == "bash":
+        lines = len(output.splitlines()) if output else 0
+        return f"bash completed ({lines} lines hidden)"
+    if name == "read_file":
+        return f"read {input_data.get('path', '-')} ({len(output.splitlines())} lines hidden)"
+    if name == "TodoWrite":
+        return "plan updated"
+    if name == "review_timeline":
+        return "timeline review page ready"
+    if name == "review_render":
+        return "render review page ready"
+    if name == "render_timeline":
+        return _shorten(output, 140)
+    if name == "qc_check":
+        issue_line = next((l for l in output.splitlines() if l.startswith("issues:")), "")
+        return issue_line or "qc completed"
+    if output.startswith("Error:"):
+        return _shorten(output, 180)
+    return f"{name} completed"
+
+
+def record_tool_log(name: str, input_data: dict, output: str):
+    entry = {
+        "name": name,
+        "input": input_data,
+        "input_summary": _shorten(input_data, 240),
+        "output": str(output),
+        "summary": summarize_tool_result(name, input_data, str(output)),
+        "ts": time.strftime("%H:%M:%S"),
+    }
+    TOOL_LOGS.append(entry)
+    del TOOL_LOGS[:-MAX_TOOL_LOGS]
+    return entry
+
+
+def render_tool_logs(full: bool = False, limit: int = 12) -> str:
+    if not TOOL_LOGS:
+        return "No tool logs yet."
+    rows = []
+    recent = TOOL_LOGS[-limit:]
+    for idx, item in enumerate(recent, start=max(len(TOOL_LOGS) - len(recent) + 1, 1)):
+        rows.append(f"{idx}. [{item['ts']}] {item['name']}: {item['summary']}")
+        if full:
+            rows.append(f"   input: {item['input_summary']}")
+            rows.append("   output:")
+            rows.append("   " + _shorten(item["output"], 1200).replace("\n", "\n   "))
+    return "\n".join(rows)
+
+
+def clear_tool_logs():
+    TOOL_LOGS.clear()
+
+
+def set_verbose_tools(enabled: bool):
+    global VERBOSE_TOOLS
+    VERBOSE_TOOLS = bool(enabled)
+
+
+def agent_loop(messages: list, verbose: bool | None = None):
+    if verbose is None:
+        verbose = VERBOSE_TOOLS
     rounds_without_todo = 0
     while True:
         microcompact(messages)
@@ -139,9 +212,13 @@ def agent_loop(messages: list, verbose: bool = True):
                         output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     output = f"Error: {type(e).__name__}: {e}"
+                log_entry = record_tool_log(block.name, block.input, output)
                 if verbose:
                     print(f"\033[33m> {block.name}\033[0m {str(block.input)[:160]}")
                     print(f"  {str(output)[:240]}")
+                else:
+                    print(f"✓ {log_entry['summary']}  " +
+                          "\033[2m(use /logs to expand)\033[0m")
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": str(output)})
                 if block.name == "TodoWrite":
