@@ -34,6 +34,8 @@ veoai
 veoai --help
 ```
 
+启动后会进入一个终端欢迎面板，展示当前项目目录、主模型协议/模型、常用命令和使用提示。`veoai` 会保持在交互会话中；如果主模型网关返回 502、上游禁止访问、模型无权限等错误，会在终端给出诊断提示而不是直接崩溃退出。
+
 后续更新到 GitHub 最新版本：
 
 ```bash
@@ -152,11 +154,14 @@ veoai demo \
 
 交互模式内置命令：
 
-- `/model`：切换主模型的 Base URL、API key 和模型 ID，并立即用于后续 agent loop。
+- `/model`：切换主模型协议、Base URL、API key 和模型 ID，并立即用于后续 agent loop。
 - `/todos`：查看当前剪辑计划。
 - `/bg`：查看后台转写或渲染任务。
 - `/compact`：手动压缩上下文。
+- `?` 或 `/help`：查看快捷命令。
 - `/quit`：退出。
+
+如果遇到类似 `OpenAI-compatible API error 502`、`Upstream access forbidden` 的主模型错误，通常是三方网关上游不可用、模型无权限或管理员限制。此时直接输入 `/model` 切换协议、Base URL、API key 或模型 ID 后重试即可。
 
 项目文件会放在：
 

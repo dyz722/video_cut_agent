@@ -90,6 +90,11 @@ def main():
           and openai_msgs[2]["tool_calls"][0]["function"]["name"] == "demo_tool"
           and openai_msgs[3]["role"] == "tool")
     check("veoai update dry-run", cli.main(["update", "--dry-run"]) == 0)
+    splash = cli.welcome_screen()
+    check("welcome screen renders", "Welcome back!" in splash and "Shortcuts" in splash)
+    err = cli.format_cli_error(RuntimeError(
+        'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
+    check("model API error is user friendly", "/model" in err and "没有退出" in err)
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)

@@ -14,15 +14,127 @@ video-agent CLI
 """
 
 import argparse
+import os
 import subprocess
 import sys
+import textwrap
+import shutil
 from pathlib import Path
+from importlib.metadata import PackageNotFoundError, version
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent import config  # noqa: E402
 
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
+
+
+def _pkg_version() -> str:
+    try:
+        return version("video-cut-agent")
+    except PackageNotFoundError:
+        return "dev"
+
+
+def _color(text: str, code: str) -> str:
+    if os.getenv("NO_COLOR"):
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _clip(text: str, width: int) -> str:
+    text = str(text)
+    return text if len(text) <= width else text[:max(width - 1, 0)] + "…"
+
+
+def _box(title: str, lines: list[str], width: int) -> str:
+    inner = max(width - 4, 20)
+    out = [
+        "+" + "-" * (width - 2) + "+",
+        "| " + _clip(title, inner).ljust(inner) + " |",
+        "+" + "-" * (width - 2) + "+",
+    ]
+    for line in lines:
+        wrapped = textwrap.wrap(str(line), inner) or [""]
+        for item in wrapped:
+            out.append("| " + _clip(item, inner).ljust(inner) + " |")
+    out.append("+" + "-" * (width - 2) + "+")
+    return "\n".join(out)
+
+
+def welcome_screen() -> str:
+    cols = shutil.get_terminal_size((100, 24)).columns
+    width = min(max(cols - 4, 72), 108)
+    project = str(config.PROJECT_DIR)
+    proto = config.main_model_protocol()
+    model = config.main_model()
+    left_lines = [
+        "Welcome back!",
+        "",
+        "        __",
+        "   ____/ /__  ___  ___ ____ _",
+        "  / __/ / _ \\/ _ \\/ _ `/  ' \\",
+        "  \\__/_/\\___/_//_/\\_,_/_/_/_/",
+        "",
+        f"model: {model}",
+        f"protocol: {proto}",
+        f"project: {project}",
+    ]
+    right_lines = [
+        "Tips for getting started",
+        "1. Put source videos in materials/ or run with --materials.",
+        "2. Ask for a clip; veoai will create timeline JSON first.",
+        "3. Review timeline/render in the generated HTML pages.",
+        "",
+        "Shortcuts",
+        "/model   switch model provider",
+        "/todos   show current plan",
+        "/bg      check background jobs",
+        "/compact compress context",
+        "/quit    exit",
+    ]
+    panel_w = (width - 3) // 2
+    left = _box(f"veoai v{_pkg_version()}", left_lines, panel_w).splitlines()
+    right = _box("Guide", right_lines, width - panel_w - 3).splitlines()
+    height = max(len(left), len(right))
+    left += [" " * panel_w] * (height - len(left))
+    right += [" " * (width - panel_w - 3)] * (height - len(right))
+    body = "\n".join(l + "   " + r for l, r in zip(left, right))
+    footer = "\n" + _color('Try "把 materials 里的素材剪一条带货短视频"', "2") + "\n" + \
+        _color("? for shortcuts", "2")
+    return _color(body, "38;5;209") + footer
+
+
+def command_help() -> str:
+    return "\n".join([
+        "commands:",
+        "  /model     切换主模型协议、Base URL、API key 和模型 ID",
+        "  /todos     查看当前剪辑计划",
+        "  /bg        查看后台转写/渲染任务",
+        "  /compact   手动压缩上下文",
+        "  /quit      退出",
+        "  ? or /help 显示此帮助",
+    ])
+
+
+def format_cli_error(exc: Exception) -> str:
+    msg = str(exc)
+    hints = []
+    if "OpenAI-compatible API error" in msg or "Anthropic" in type(exc).__name__:
+        hints.extend([
+            "主模型 API 调用失败，veoai 已保持在当前会话中，没有退出。",
+            "你可以输入 /model 切换协议、Base URL、API key 或模型 ID 后重试。",
+        ])
+    if "502" in msg or "Upstream" in msg or "forbidden" in msg.lower():
+        hints.append("这通常是三方网关上游不可用、模型无权限或管理员限制，不是剪辑流程本身的问题。")
+    if not hints:
+        hints.append("发生未处理异常，veoai 已拦截并保持 REPL 继续运行。")
+    return "\n".join([
+        _color("[error] " + type(exc).__name__, "31"),
+        _clip(msg, 1800),
+        "",
+        *("- " + h for h in hints),
+    ])
 
 
 def link_materials(src: str):
@@ -48,9 +160,7 @@ def repl():
     from agent.background import BG
     from agent.compact import auto_compact
 
-    print(f"veoai | project: {config.PROJECT_DIR.name} | "
-          f"model: {config.main_model()}")
-    print("commands: /model /todos /bg /compact /quit\n")
+    print(welcome_screen())
     history = []
     while True:
         try:
@@ -62,6 +172,8 @@ def repl():
             if q == "":
                 continue
             break
+        if q in ("/help", "?"):
+            print(command_help()); continue
         if q == "/todos":
             print(TODO.render()); continue
         if q == "/bg":
@@ -81,6 +193,9 @@ def repl():
         except KeyboardInterrupt:
             print("\n[interrupted - 输入新指令继续]")
             continue
+        except Exception as e:
+            print(format_cli_error(e))
+            continue
         content = history[-1]["content"]
         if isinstance(content, list):
             for block in content:
@@ -94,12 +209,17 @@ def batch(task: str):
     history = [{"role": "user", "content":
                 f"{task}\n\n(批处理模式: 按标准工作流自主完成全部出片, 不要向人提问。"
                 f"完成后输出: 每条成片的路径 + 质检结论汇总。)"}]
-    agent_loop(history)
+    try:
+        agent_loop(history)
+    except Exception as e:
+        print(format_cli_error(e))
+        return 1
     content = history[-1]["content"]
     if isinstance(content, list):
         for block in content:
             if hasattr(block, "text"):
                 print(block.text)
+    return 0
 
 
 def update_self(repo: str = DEFAULT_REPO_URL, dry_run: bool = False) -> int:
@@ -136,7 +256,11 @@ def main(argv=None):
         args = up.parse_args(argv[1:])
         return update_self(args.repo, args.dry_run)
 
-    ap = argparse.ArgumentParser(description="veoai: 视频剪辑 agent")
+    ap = argparse.ArgumentParser(
+        description="veoai: 视频剪辑 agent",
+        epilog="special commands:\n  veoai update [--dry-run]    从 GitHub 更新到最新版本",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     ap.add_argument("project", nargs="?", default=".",
                     help="项目目录, 默认当前目录; 相对路径基于启动 veoai 的目录")
     ap.add_argument("--materials", help="素材文件/目录, 链接进项目 materials/")
@@ -152,7 +276,7 @@ def main(argv=None):
     if args.materials:
         link_materials(args.materials)
     if args.batch:
-        batch(args.batch)
+        return batch(args.batch)
     else:
         repl()
     return 0
