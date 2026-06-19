@@ -95,6 +95,35 @@ def main():
     err = cli.format_cli_error(RuntimeError(
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
+    check("slash command completion /m", cli.complete_slash_command("/m", 0) == "/model")
+    slash_matches = []
+    i = 0
+    while True:
+        item = cli.complete_slash_command("/", i)
+        if item is None:
+            break
+        slash_matches.append(item)
+        i += 1
+    check("slash command completion lists commands",
+          "/model" in slash_matches and "/quit" in slash_matches)
+    check("prompt status includes project",
+          str(cli.config.PROJECT_DIR) in cli.prompt_status())
+    check("prompt session optional",
+          cli.create_prompt_session() is not None or cli.setup_readline_completion())
+    old_user_data_dir = cli.config.USER_DATA_DIR
+    hist_root = Path(tempfile.mkdtemp(prefix="veoai_history_test_"))
+    try:
+        cli.config.USER_DATA_DIR = hist_root
+        history_supported = cli.setup_readline_completion()
+        if history_supported:
+            check("repl history stores prompts", cli.add_repl_history("剪一条带货视频"))
+            check("repl history file written",
+                  "剪一条带货视频" in (hist_root / "history").read_text())
+        else:
+            check("repl history gracefully optional", True)
+    finally:
+        cli.config.USER_DATA_DIR = old_user_data_dir
+        shutil.rmtree(hist_root, ignore_errors=True)
 
     print("[2] skills")
     sk = SkillLoader(config.SKILLS_DIRS)

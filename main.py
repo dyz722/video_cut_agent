@@ -14,6 +14,7 @@ video-agent CLI
 """
 
 import argparse
+import atexit
 import os
 import subprocess
 import sys
@@ -27,6 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent import config  # noqa: E402
 
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
+SLASH_COMMANDS = ["/model", "/todos", "/bg", "/compact", "/help", "/quit"]
+_READLINE = None
+_HISTORY_REGISTERED = False
 
 
 def _pkg_version() -> str:
@@ -91,6 +95,8 @@ def welcome_screen() -> str:
         "/todos   show current plan",
         "/bg      check background jobs",
         "/compact compress context",
+        "Tab      complete slash commands",
+        "Up/Down  browse prompt history",
         "/quit    exit",
     ]
     panel_w = (width - 3) // 2
@@ -113,8 +119,127 @@ def command_help() -> str:
         "  /bg        查看后台转写/渲染任务",
         "  /compact   手动压缩上下文",
         "  /quit      退出",
+        "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
+        "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
         "  ? or /help 显示此帮助",
     ])
+
+
+def prompt_status() -> str:
+    return f" {config.main_model()} · {config.PROJECT_DIR} "
+
+
+def complete_slash_command(text: str, state: int):
+    matches = [cmd for cmd in SLASH_COMMANDS if cmd.startswith(text)]
+    return matches[state] if state < len(matches) else None
+
+
+def _slash_matches(text: str) -> list[str]:
+    return [cmd for cmd in SLASH_COMMANDS if cmd.startswith(text)]
+
+
+def create_prompt_session():
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return None
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.formatted_text import HTML
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.styles import Style
+    except Exception:
+        return None
+
+    class SlashCompleter(Completer):
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            if not text.startswith("/"):
+                return
+            for cmd in _slash_matches(text):
+                yield Completion(cmd, start_position=-len(text))
+
+    history_file = repl_history_path()
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    style = Style.from_dict({
+        "prompt": "ansicyan bold",
+        "toolbar": "reverse ansigreen",
+    })
+    return PromptSession(
+        [("class:prompt", "› ")],
+        completer=SlashCompleter(),
+        history=FileHistory(str(history_file)),
+        complete_while_typing=False,
+        bottom_toolbar=lambda: HTML(
+            f'<style bg="ansiblack" fg="ansigreen"> {prompt_status()} </style>'),
+        style=style,
+    )
+
+
+def _readline_module():
+    global _READLINE
+    if _READLINE is not None:
+        return _READLINE
+    try:
+        import readline
+    except Exception:
+        return None
+    _READLINE = readline
+    return _READLINE
+
+
+def repl_history_path() -> Path:
+    return config.USER_DATA_DIR / "history"
+
+
+def _save_readline_history(history_file: Path | None = None):
+    readline = _readline_module()
+    if not readline:
+        return
+    history_file = history_file or repl_history_path()
+    try:
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        readline.write_history_file(str(history_file))
+    except Exception:
+        pass
+
+
+def setup_readline_completion() -> bool:
+    global _HISTORY_REGISTERED
+    readline = _readline_module()
+    if not readline:
+        return False
+    try:
+        readline.set_completer(complete_slash_command)
+        readline.set_completer_delims(readline.get_completer_delims().replace("/", ""))
+        readline.parse_and_bind("tab: complete")
+        readline.parse_and_bind("bind ^I rl_complete")  # libedit on macOS
+        history_file = repl_history_path()
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        if history_file.exists():
+            readline.read_history_file(str(history_file))
+        readline.set_history_length(int(os.getenv("VEOAI_HISTORY_LIMIT", "1000")))
+        if not _HISTORY_REGISTERED:
+            atexit.register(_save_readline_history, history_file)
+            _HISTORY_REGISTERED = True
+        return True
+    except Exception:
+        return False
+
+
+def add_repl_history(line: str) -> bool:
+    readline = _readline_module()
+    line = (line or "").strip()
+    if not readline or not line:
+        return False
+    try:
+        length = readline.get_current_history_length()
+        last = readline.get_history_item(length) if length else None
+        if last != line:
+            readline.add_history(line)
+        _save_readline_history()
+        return True
+    except Exception:
+        return False
 
 
 def format_cli_error(exc: Exception) -> str:
@@ -160,11 +285,20 @@ def repl():
     from agent.background import BG
     from agent.compact import auto_compact
 
+    prompt_session = create_prompt_session()
+    completion_enabled = bool(prompt_session) or setup_readline_completion()
     print(welcome_screen())
+    if prompt_session:
+        print(_color("Prompt UI enabled: /m + Tab, ↑ for history", "2"))
+    elif completion_enabled:
+        print(_color("Tab completion and history enabled: try /m + Tab, or ↑ for history", "2"))
     history = []
     while True:
         try:
-            query = input("\033[36mveoai >> \033[0m")
+            if prompt_session:
+                query = prompt_session.prompt()
+            else:
+                query = input("\033[36mveoai >> \033[0m")
         except (EOFError, KeyboardInterrupt):
             break
         q = query.strip()
@@ -172,7 +306,9 @@ def repl():
             if q == "":
                 continue
             break
-        if q in ("/help", "?"):
+        if not prompt_session:
+            add_repl_history(query)
+        if q in ("/help", "?", "/"):
             print(command_help()); continue
         if q == "/todos":
             print(TODO.render()); continue
