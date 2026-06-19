@@ -15,9 +15,12 @@ video-agent CLI
 
 import argparse
 import atexit
+from contextlib import contextmanager
 import os
+import signal
 import subprocess
 import sys
+import threading
 import textwrap
 import shutil
 from pathlib import Path
@@ -100,6 +103,7 @@ def welcome_screen() -> str:
         "/bg      check background jobs",
         "/compact compress context",
         "/logs    inspect hidden tool logs",
+        "Esc      interrupt current run",
         "Tab      complete slash commands",
         "Up/Down  browse prompt history",
         "/quit    exit",
@@ -129,6 +133,7 @@ def command_help() -> str:
         "  /logs clear 清空工具日志",
         "  /verbose on|off 切换详细工具输出",
         "  /quit      退出",
+        "  Esc        中断当前运行, 回到输入框继续引导",
         "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
         "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
         "  ? or /help 显示此帮助",
@@ -252,6 +257,54 @@ def add_repl_history(line: str) -> bool:
         return False
 
 
+@contextmanager
+def esc_interrupt_monitor():
+    """Turn Esc into KeyboardInterrupt while the agent is running."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        yield
+        return
+    try:
+        import select
+        import termios
+        import tty
+    except Exception:
+        yield
+        return
+
+    fd = sys.stdin.fileno()
+    old_attrs = None
+    stop = threading.Event()
+
+    def watch():
+        try:
+            while not stop.is_set():
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if not ready:
+                    continue
+                ch = os.read(fd, 1)
+                if ch == b"\x1b":
+                    sys.stdout.write("\n[interrupt] Esc pressed. Stopping current run...\n")
+                    sys.stdout.flush()
+                    os.kill(os.getpid(), signal.SIGINT)
+                    return
+        except Exception:
+            return
+
+    try:
+        old_attrs = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        thread = threading.Thread(target=watch, daemon=True)
+        thread.start()
+        yield
+    finally:
+        stop.set()
+        if old_attrs is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            except Exception:
+                pass
+
+
 def format_cli_error(exc: Exception) -> str:
     msg = str(exc)
     hints = []
@@ -362,9 +415,10 @@ def repl():
             continue
         history.append({"role": "user", "content": query})
         try:
-            agent_loop(history)
+            with esc_interrupt_monitor():
+                agent_loop(history)
         except KeyboardInterrupt:
-            print("\n[interrupted - 输入新指令继续]")
+            print("\n[interrupted - 上下文已保留，输入新指令继续]")
             continue
         except Exception as e:
             print(format_cli_error(e))
