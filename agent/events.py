@@ -9,6 +9,8 @@ from dataclasses import dataclass, asdict
 import threading
 import time
 
+from . import log_store
+
 
 MAX_EVENTS = 240
 
@@ -59,6 +61,7 @@ class RunEventBus:
             if kind in ("tool", "obs", "status", "plan", "issue", "bg"):
                 self.current_run["current"] = event.summary
                 self.current_run["status"] = kind
+        log_store.append_jsonl(log_store.EVENT_LOG, event_to_dict(event))
         if print_event and self.live_enabled:
             print(format_event(event))
         return event
@@ -122,6 +125,9 @@ class RunEventBus:
     def clear(self):
         with self._lock:
             self._events.clear()
+
+    def persisted(self, limit: int = 500) -> list[dict]:
+        return log_store.read_jsonl(log_store.EVENT_LOG, limit=limit)
 
 
 def _shorten(text: str, limit: int) -> str:

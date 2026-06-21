@@ -33,7 +33,7 @@ from agent import config  # noqa: E402
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
 SLASH_COMMANDS = [
     "/model", "/dashscope", "/resume", "/todos", "/bg", "/compact",
-    "/logs", "/live", "/status", "/stop", "/verbose", "/help", "/quit",
+    "/logs", "/logview", "/live", "/status", "/stop", "/verbose", "/help", "/quit",
 ]
 _READLINE = None
 _HISTORY_REGISTERED = False
@@ -104,6 +104,7 @@ def welcome_screen() -> str:
         "/bg      check background jobs",
         "/compact compress context",
         "/logs    inspect hidden tool logs",
+        "/logview open web log viewer",
         "/live    show live agent events",
         "/status  show current run status",
         "/stop    stop current run",
@@ -137,6 +138,7 @@ def command_help() -> str:
         "  /logs      查看最近工具调用摘要",
         "  /logs full 展开最近工具输入/输出",
         "  /logs clear 清空工具日志",
+        "  /logview   打开本地 Web 日志查看器",
         "  /live      查看最近 agent 运行事件",
         "  /status    查看当前运行状态",
         "  /stop      请求停止当前运行中的 agent",
@@ -356,6 +358,7 @@ def repl():
     from agent import loop as loop_state
     from agent import session as session_store
     from agent.events import EVENTS
+    from agent.log_view import open_log_view
     from agent.todo import TODO
     from agent.background import BG
     from agent.compact import auto_compact
@@ -510,6 +513,9 @@ def repl():
                 print("[logs] cleared")
             else:
                 print(loop_state.render_tool_logs(full=(len(parts) > 1 and parts[1] == "full")))
+            continue
+        if q == "/logview":
+            print(open_log_view(open_browser=True))
             continue
         if q.startswith("/verbose"):
             parts = q.split()

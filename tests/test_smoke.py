@@ -11,12 +11,14 @@
 """
 
 import json
+import http.client
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +55,8 @@ def main():
     import agent.loop  # noqa
     import agent.subagent  # noqa
     from agent.events import EVENTS
+    from agent import log_store
+    from agent.log_view import open_log_view
     from agent import session as session_store
     import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
@@ -118,24 +122,56 @@ def main():
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
     check("status context usable", hasattr(agent.loop, "status"))
-    EVENTS.clear()
-    EVENTS.emit("tool", "probe materials/a.mp4", name="probe_media", print_event=False)
-    check("live events render", "probe materials/a.mp4" in EVENTS.render())
-    check("run status idle", "No agent run" in EVENTS.status_text())
+    old_project = config.PROJECT_DIR
+    event_proj = Path(tempfile.mkdtemp(prefix="veoai_events_test_"))
+    try:
+        config.set_project(str(event_proj))
+        log_store.clear_jsonl(log_store.EVENT_LOG)
+        log_store.clear_jsonl(log_store.TOOL_LOG)
+        EVENTS.clear()
+        EVENTS.emit("tool", "probe materials/a.mp4", name="probe_media", print_event=False)
+        check("live events render", "probe materials/a.mp4" in EVENTS.render())
+        check("run events persisted",
+              log_store.read_jsonl(log_store.EVENT_LOG)[-1]["summary"] == "probe materials/a.mp4")
+        agent.loop.clear_tool_logs()
+        agent.loop.record_tool_log("bash", {"command": "ls"}, "a\nb\n")
+        check("tool logs persisted",
+              log_store.read_jsonl(log_store.TOOL_LOG)[-1]["name"] == "bash")
+        log_view = open_log_view(open_browser=False)
+        check("web log viewer starts", "Log viewer ready:" in log_view)
+        log_url = log_view.splitlines()[0].replace("Log viewer ready: ", "").strip()
+        parsed = urllib.parse.urlparse(log_url)
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=3)
+        conn.request("GET", "/")
+        page = conn.getresponse().read().decode("utf-8")
+        conn.request("GET", "/api/events")
+        api = conn.getresponse().read().decode("utf-8")
+        conn.close()
+        check("web log viewer serves html/api", "veoai logs" in page and "probe materials" in api)
+        check("run status idle", "No agent run" in EVENTS.status_text())
+    finally:
+        config.PROJECT_DIR = old_project
+        shutil.rmtree(event_proj, ignore_errors=True)
     with cli.esc_interrupt_monitor():
         pass
     check("esc interrupt monitor usable", True)
-    agent.loop.clear_tool_logs()
-    log_entry = agent.loop.record_tool_log("bash", {"command": "ls"}, "a\nb\n")
-    check("tool log records summary", "bash completed" in log_entry["summary"])
-    check("tool logs render summary", "bash:" in agent.loop.render_tool_logs())
-    check("tool logs render full", "output:" in agent.loop.render_tool_logs(full=True))
-    agent.loop.set_verbose_tools(True)
-    check("verbose toggle on", agent.loop.VERBOSE_TOOLS is True)
-    agent.loop.set_verbose_tools(False)
-    check("verbose toggle off", agent.loop.VERBOSE_TOOLS is False)
-    agent.loop.clear_tool_logs()
-    check("tool logs clear", "No tool logs" in agent.loop.render_tool_logs())
+    tool_proj = Path(tempfile.mkdtemp(prefix="veoai_tool_logs_test_"))
+    try:
+        config.set_project(str(tool_proj))
+        agent.loop.clear_tool_logs()
+        log_entry = agent.loop.record_tool_log("bash", {"command": "ls"}, "a\nb\n")
+        check("tool log records summary", "bash completed" in log_entry["summary"])
+        check("tool logs render summary", "bash:" in agent.loop.render_tool_logs())
+        check("tool logs render full", "output:" in agent.loop.render_tool_logs(full=True))
+        agent.loop.set_verbose_tools(True)
+        check("verbose toggle on", agent.loop.VERBOSE_TOOLS is True)
+        agent.loop.set_verbose_tools(False)
+        check("verbose toggle off", agent.loop.VERBOSE_TOOLS is False)
+        agent.loop.clear_tool_logs()
+        check("tool logs clear", "No tool logs" in agent.loop.render_tool_logs())
+    finally:
+        config.PROJECT_DIR = old_project
+        shutil.rmtree(tool_proj, ignore_errors=True)
     check("slash command completion /m", cli.complete_slash_command("/m", 0) == "/model")
     slash_matches = []
     i = 0
@@ -147,7 +183,7 @@ def main():
         i += 1
     check("slash command completion lists commands",
           "/model" in slash_matches and "/dashscope" in slash_matches
-          and "/live" in slash_matches and "/status" in slash_matches
+          and "/logview" in slash_matches and "/live" in slash_matches and "/status" in slash_matches
           and "/stop" in slash_matches and "/quit" in slash_matches)
     check("prompt status includes project",
           str(cli.config.PROJECT_DIR) in cli.prompt_status())

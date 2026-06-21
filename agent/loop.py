@@ -16,6 +16,7 @@ from . import config
 from .compact import estimate_tokens, microcompact, auto_compact
 from .background import BG
 from .events import EVENTS
+from . import log_store
 from .todo import TODO
 from .tools import TOOLS, TOOL_HANDLERS, SKILLS
 
@@ -196,9 +197,11 @@ def record_tool_log(name: str, input_data: dict, output: str):
         "output": str(output),
         "summary": summarize_tool_result(name, input_data, str(output)),
         "ts": time.strftime("%H:%M:%S"),
+        "run_id": EVENTS.current_run.get("run_id", ""),
     }
     TOOL_LOGS.append(entry)
     del TOOL_LOGS[:-MAX_TOOL_LOGS]
+    log_store.append_jsonl(log_store.TOOL_LOG, entry)
     return entry
 
 
@@ -218,6 +221,7 @@ def render_tool_logs(full: bool = False, limit: int = 12) -> str:
 
 def clear_tool_logs():
     TOOL_LOGS.clear()
+    log_store.clear_jsonl(log_store.TOOL_LOG)
 
 
 def set_verbose_tools(enabled: bool):
