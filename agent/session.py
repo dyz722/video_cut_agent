@@ -103,7 +103,7 @@ def render_sessions(limit: int = 20) -> str:
     for idx, item in enumerate(sessions, start=1):
         rows.append(f"{idx}. {item['title']}  [{item['id']}]  "
                     f"{item['message_count']} messages  updated {item['updated_at']}")
-    rows.append("Use /resume <number> or /resume <session_id> to continue.")
+    rows.append("Use /resume <number or session_id>, or run /resume and choose an item.")
     return "\n".join(rows)
 
 
@@ -120,3 +120,69 @@ def resolve_session(ref: str) -> str | None:
         if item["id"] == ref:
             return item["id"]
     return None
+
+
+def _block_type(block) -> str:
+    if isinstance(block, dict):
+        return block.get("type", "")
+    return getattr(block, "type", "")
+
+
+def _block_text(block) -> str:
+    if isinstance(block, dict):
+        return str(block.get("text", ""))
+    return str(getattr(block, "text", ""))
+
+
+def _tool_name(block) -> str:
+    if isinstance(block, dict):
+        return str(block.get("name", ""))
+    return str(getattr(block, "name", ""))
+
+
+def _clip(text: str, limit: int = 1400) -> str:
+    text = str(text).strip()
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _message_lines(msg: dict) -> list[str]:
+    role = msg.get("role", "")
+    content = msg.get("content", "")
+    if role == "user" and isinstance(content, str):
+        return [f"› user\n{_clip(content)}"]
+    if role == "assistant" and isinstance(content, str):
+        return [f"assistant\n{_clip(content)}"]
+    if role == "assistant" and isinstance(content, list):
+        text_parts = []
+        tools = []
+        for block in content:
+            typ = _block_type(block)
+            if typ == "text":
+                text = _block_text(block).strip()
+                if text:
+                    text_parts.append(text)
+            elif typ == "tool_use":
+                name = _tool_name(block)
+                if name:
+                    tools.append(name)
+        lines = []
+        if text_parts:
+            lines.append(f"assistant\n{_clip(chr(10).join(text_parts))}")
+        if tools:
+            lines.append(f"assistant tools\n{', '.join(tools)}")
+        return lines
+    return []
+
+
+def render_conversation(messages: list, limit: int | None = None) -> str:
+    """Render human-readable user/assistant history, hiding tool_result payloads."""
+    display_messages = messages[-limit:] if limit else messages
+    rows = []
+    hidden = len(messages) - len(display_messages)
+    if hidden > 0:
+        rows.append(f"... {hidden} earlier messages hidden ...")
+    for msg in display_messages:
+        rows.extend(_message_lines(msg))
+    if not rows:
+        return "(no user/assistant messages to replay)"
+    return "\n\n".join(rows)

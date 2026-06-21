@@ -211,12 +211,27 @@ def main():
     print("[3b] sessions")
     sid1 = session_store.new_session()
     sid2 = session_store.new_session()
-    session_store.save_session(sid1, [{"role": "user", "content": "会话一"}])
+    session_store.save_session(sid1, [
+        {"role": "user", "content": "会话一"},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "我会先检查素材。"},
+            {"type": "tool_use", "id": "tool_1", "name": "bash", "input": {"command": "ls"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "tool_1", "content": "hidden output"},
+        ]},
+    ])
     session_store.save_session(sid2, [{"role": "user", "content": "会话二"}])
     rendered_sessions = session_store.render_sessions()
     check("sessions listed", sid1 in rendered_sessions and sid2 in rendered_sessions)
+    check("sessions prompt selectable", "choose an item" in rendered_sessions)
     loaded = session_store.load_session(sid1)
     check("session loads isolated messages", loaded["messages"][0]["content"] == "会话一")
+    transcript = session_store.render_conversation(loaded["messages"])
+    check("session conversation replay renders user/assistant",
+          "› user" in transcript and "会话一" in transcript
+          and "assistant" in transcript and "我会先检查素材" in transcript)
+    check("session conversation replay hides tool results", "hidden output" not in transcript)
     check("session resolve by id", session_store.resolve_session(sid2) == sid2)
     check("session resolve by number", session_store.resolve_session("1") in {sid1, sid2})
 

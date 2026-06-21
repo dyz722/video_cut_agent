@@ -129,7 +129,7 @@ def command_help() -> str:
         "commands:",
         "  /model     切换主模型协议、Base URL、API key 和模型 ID",
         "  /dashscope 配置/切换 DashScope 国内或海外 endpoint/key",
-        "  /resume    查看当前项目下可恢复的会话",
+        "  /resume    查看当前项目下可恢复的会话并选择恢复",
         "  /resume <序号或ID> 恢复某个会话, 上下文不与其他会话交叉",
         "  /todos     查看当前剪辑计划",
         "  /bg        查看后台转写/渲染任务",
@@ -420,6 +420,29 @@ def repl():
         run_thread.start()
         print(_color("[agent] run started. Use /status, /live, /logs, /bg, /todos, or /stop.", "2"))
 
+    def resume_session(resolved: str):
+        nonlocal session_id, session_name, history
+        data = session_store.load_session(resolved)
+        session_id = resolved
+        session_name = data.get("title") or "resumed session"
+        history = data.get("messages", [])
+        print(f"[session] resumed {session_name} ({session_id}), "
+              f"{len(history)} messages")
+        print(_color("---- conversation history ----", "2"))
+        print(session_store.render_conversation(history))
+        print(_color("---- continue typing to resume ----", "2"))
+
+    def choose_resume_ref() -> str:
+        sessions = session_store.list_sessions()
+        if not sessions:
+            print("No sessions in this project yet.")
+            return ""
+        print(session_store.render_sessions())
+        value = _safe_input("Resume session number or ID (Enter to cancel): ")
+        if value.lower() in ("q", "quit", "cancel"):
+            return ""
+        return value
+
     while True:
         try:
             if prompt_session:
@@ -469,18 +492,16 @@ def repl():
                 continue
             parts = q.split(maxsplit=1)
             if len(parts) == 1:
-                print(session_store.render_sessions())
-                continue
-            resolved = session_store.resolve_session(parts[1])
+                ref = choose_resume_ref()
+                if not ref:
+                    continue
+            else:
+                ref = parts[1]
+            resolved = session_store.resolve_session(ref)
             if not resolved:
                 print("Session not found. Use /resume to list sessions.")
                 continue
-            data = session_store.load_session(resolved)
-            session_id = resolved
-            session_name = data.get("title") or "resumed session"
-            history = data.get("messages", [])
-            print(f"[session] resumed {session_name} ({session_id}), "
-                  f"{len(history)} messages")
+            resume_session(resolved)
             continue
         if q.startswith("/logs"):
             parts = q.split()
