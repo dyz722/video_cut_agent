@@ -32,7 +32,7 @@ from agent import config  # noqa: E402
 
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
 SLASH_COMMANDS = [
-    "/model", "/dashscope", "/todos", "/bg", "/compact",
+    "/model", "/dashscope", "/resume", "/todos", "/bg", "/compact",
     "/logs", "/verbose", "/help", "/quit",
 ]
 _READLINE = None
@@ -99,6 +99,7 @@ def welcome_screen() -> str:
         "Shortcuts",
         "/model   switch model provider",
         "/dashscope switch cn/intl DashScope",
+        "/resume  resume project session",
         "/todos   show current plan",
         "/bg      check background jobs",
         "/compact compress context",
@@ -125,6 +126,8 @@ def command_help() -> str:
         "commands:",
         "  /model     切换主模型协议、Base URL、API key 和模型 ID",
         "  /dashscope 配置/切换 DashScope 国内或海外 endpoint/key",
+        "  /resume    查看当前项目下可恢复的会话",
+        "  /resume <序号或ID> 恢复某个会话, 上下文不与其他会话交叉",
         "  /todos     查看当前剪辑计划",
         "  /bg        查看后台转写/渲染任务",
         "  /compact   手动压缩上下文",
@@ -345,6 +348,7 @@ def link_materials(src: str):
 def repl():
     from agent.loop import agent_loop
     from agent import loop as loop_state
+    from agent import session as session_store
     from agent.todo import TODO
     from agent.background import BG
     from agent.compact import auto_compact
@@ -356,7 +360,10 @@ def repl():
         print(_color("Prompt UI enabled: /m + Tab, ↑ for history", "2"))
     elif completion_enabled:
         print(_color("Tab completion and history enabled: try /m + Tab, or ↑ for history", "2"))
+    session_id = session_store.new_session()
+    session_name = "new session"
     history = []
+    print(_color(f"session: {session_id} · use /resume to switch", "2"))
     while True:
         try:
             if prompt_session:
@@ -378,6 +385,22 @@ def repl():
             print(TODO.render()); continue
         if q == "/bg":
             print(BG.check()); continue
+        if q.startswith("/resume"):
+            parts = q.split(maxsplit=1)
+            if len(parts) == 1:
+                print(session_store.render_sessions())
+                continue
+            resolved = session_store.resolve_session(parts[1])
+            if not resolved:
+                print("Session not found. Use /resume to list sessions.")
+                continue
+            data = session_store.load_session(resolved)
+            session_id = resolved
+            session_name = data.get("title") or "resumed session"
+            history = data.get("messages", [])
+            print(f"[session] resumed {session_name} ({session_id}), "
+                  f"{len(history)} messages")
+            continue
         if q.startswith("/logs"):
             parts = q.split()
             if len(parts) > 1 and parts[1] == "clear":
@@ -414,15 +437,21 @@ def repl():
                 print("[compacted]")
             continue
         history.append({"role": "user", "content": query})
+        session_store.save_session(session_id, history, session_name)
         try:
             with esc_interrupt_monitor():
                 agent_loop(history)
         except KeyboardInterrupt:
+            session_store.save_session(session_id, history, session_name)
             print("\n[interrupted - 上下文已保留，输入新指令继续]")
             continue
         except Exception as e:
+            session_store.save_session(session_id, history, session_name)
             print(format_cli_error(e))
             continue
+        if session_name == "new session":
+            session_name = session_store.session_title(history)
+        session_store.save_session(session_id, history, session_name)
         content = history[-1]["content"]
         if isinstance(content, list):
             for block in content:

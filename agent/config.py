@@ -96,7 +96,10 @@ def _default_model_for(protocol: str) -> str:
 
 def _prompt_choice(prompt: str, current: str, choices: dict[str, str]) -> str:
     labels = " / ".join(f"{k}={v}" for k, v in choices.items())
-    value = input(f"{prompt} ({labels}, 当前 {current}, 回车保留): ").strip().lower()
+    try:
+        value = input(f"{prompt} ({labels}, 当前 {current}, 回车保留): ").strip().lower()
+    except EOFError:
+        return current
     if not value:
         return current
     return choices.get(value, value)
@@ -179,10 +182,16 @@ def configure_dashscope(force: bool = False):
         key_name = _dashscope_key_name(r)
         current_base = os.getenv(base_name, _dashscope_default_base(r))
         current_key = os.getenv(key_name, os.getenv("DASHSCOPE_API_KEY", ""))
-        base = input(f"[DashScope 配置] {label} Base URL "
-                     f"(当前 {current_base}, 回车保留): ").strip() or current_base
+        try:
+            base = input(f"[DashScope 配置] {label} Base URL "
+                         f"(当前 {current_base}, 回车保留): ").strip() or current_base
+        except EOFError:
+            base = current_base
         key_hint = f"当前 {_mask(current_key)}, 回车保留" if current_key else "回车跳过"
-        key = input(f"[DashScope 配置] {label} API key ({key_hint}): ").strip() or current_key
+        try:
+            key = input(f"[DashScope 配置] {label} API key ({key_hint}): ").strip() or current_key
+        except EOFError:
+            key = current_key
         values[base_name] = base
         if key:
             values[key_name] = key

@@ -51,6 +51,7 @@ def main():
     )
     import agent.loop  # noqa
     import agent.subagent  # noqa
+    from agent import session as session_store
     import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
@@ -175,6 +176,7 @@ def main():
     sk.reload()
 
     print("[3] synthetic materials")
+    shutil.rmtree(config.WORKSPACE_ROOT / "_smoke", ignore_errors=True)
     proj = config.set_project("_smoke")
     mats = proj / "materials"
     external_dir = Path(tempfile.mkdtemp(prefix="video_agent_smoke_external_"))
@@ -197,6 +199,18 @@ def main():
           ("a.mp4", "b.mp4", "noaudio.mp4", "bgm.mp3", "banner.png")))
     check("symlinked materials are readable",
           "duration:" in perception.probe.probe_media("materials/external_link.mp4"))
+
+    print("[3b] sessions")
+    sid1 = session_store.new_session()
+    sid2 = session_store.new_session()
+    session_store.save_session(sid1, [{"role": "user", "content": "会话一"}])
+    session_store.save_session(sid2, [{"role": "user", "content": "会话二"}])
+    rendered_sessions = session_store.render_sessions()
+    check("sessions listed", sid1 in rendered_sessions and sid2 in rendered_sessions)
+    loaded = session_store.load_session(sid1)
+    check("session loads isolated messages", loaded["messages"][0]["content"] == "会话一")
+    check("session resolve by id", session_store.resolve_session(sid2) == sid2)
+    check("session resolve by number", session_store.resolve_session("1") in {sid1, sid2})
 
     print("[4] timeline validation")
     tl = {

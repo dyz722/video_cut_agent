@@ -161,6 +161,8 @@ veoai demo \
 
 - `/model`：切换主模型协议、Base URL、API key 和模型 ID，并立即用于后续 agent loop。
 - `/dashscope`：配置/切换 DashScope 国内或海外 endpoint/key，用于 ASR、视觉理解和 TTS。
+- `/resume`：查看当前工作目录下的历史会话。
+- `/resume <序号或ID>`：恢复某个会话继续工作；每个会话上下文独立，不与其他会话交叉。
 - `/todos`：查看当前剪辑计划。
 - `/bg`：查看后台转写或渲染任务。
 - `/compact`：手动压缩上下文。
@@ -184,7 +186,10 @@ veoai demo \
   analysis/       转写、场景检测、抽帧等感知产物
   timeline*.json  剪辑决策清单
   output/         渲染成片
+  .veoai/         当前项目的会话上下文与元数据
 ```
+
+会话保存在当前项目目录的 `.veoai/sessions/` 下。你在同一个工作目录重新进入 `veoai` 后，可以用 `/resume` 选择继续之前的会话；不同工作目录、不同会话的上下文不会互相混用。
 
 ## 工作流
 
