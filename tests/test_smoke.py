@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,13 +52,14 @@ def main():
     )
     import agent.loop  # noqa
     import agent.subagent  # noqa
+    from agent.events import EVENTS
     from agent import session as session_store
     import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
     from action import timeline as tl_mod
     from action.review import review_timeline, review_render, summarize_review_feedback
-    from action.render import render_file
+    from action.render import render_file, render_request
     from action.qc import qc_check
     from action.ass_effects import build_ass
     check("all modules import", True)
@@ -116,6 +118,10 @@ def main():
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
     check("status context usable", hasattr(agent.loop, "status"))
+    EVENTS.clear()
+    EVENTS.emit("tool", "probe materials/a.mp4", name="probe_media", print_event=False)
+    check("live events render", "probe materials/a.mp4" in EVENTS.render())
+    check("run status idle", "No agent run" in EVENTS.status_text())
     with cli.esc_interrupt_monitor():
         pass
     check("esc interrupt monitor usable", True)
@@ -140,7 +146,9 @@ def main():
         slash_matches.append(item)
         i += 1
     check("slash command completion lists commands",
-          "/model" in slash_matches and "/dashscope" in slash_matches and "/quit" in slash_matches)
+          "/model" in slash_matches and "/dashscope" in slash_matches
+          and "/live" in slash_matches and "/status" in slash_matches
+          and "/stop" in slash_matches and "/quit" in slash_matches)
     check("prompt status includes project",
           str(cli.config.PROJECT_DIR) in cli.prompt_status())
     check("prompt session optional",
@@ -244,6 +252,15 @@ def main():
     (proj / "timeline_smoke.json").write_text(json.dumps(tl, ensure_ascii=False))
     v = tl_mod.validate_file("timeline_smoke.json")
     check("valid timeline passes", v.startswith("VALID"), v)
+    render_gate = {}
+    t = threading.Thread(
+        target=lambda: render_gate.update(
+            result=render_request("timeline_smoke.json", background=False)))
+    t.start()
+    t.join(timeout=3)
+    check("render_request in worker asks for approval",
+          not t.is_alive()
+          and str(render_gate.get("result", "")).startswith("HUMAN APPROVAL REQUIRED"))
     rv = review_timeline("timeline_smoke.json", open_browser=False, start_server=False)
     review_dir = proj / "review" / "timeline_smoke"
     check("review_timeline generates html", (review_dir / "index.html").exists(), rv)

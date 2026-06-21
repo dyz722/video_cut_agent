@@ -9,6 +9,7 @@
 import json
 import shutil
 import subprocess
+import threading
 
 from agent import config
 from agent.background import BG
@@ -225,14 +226,28 @@ def render_file(path: str) -> str:
             f"Next: qc_check + watch_video to self-review.")
 
 
-def render_request(path: str = "timeline.json", background: bool = True) -> str:
+def render_request(path: str = "timeline.json", background: bool = True,
+                   approved: bool = False) -> str:
     """渲染入口: 校验 -> (人审) -> 后台渲染。"""
     from .timeline import validate_file
     v = validate_file(path)
     if v.startswith(("Error", "INVALID")):
         return v
-    if not config.AUTO_MODE:
+    if not config.AUTO_MODE and not approved:
         tl = load_timeline(path)
+        summary = [
+            f"HUMAN APPROVAL REQUIRED for render: {path}",
+            v,
+        ]
+        for i, c in enumerate(tl["clips"][:12]):
+            summary.append(
+                f"clip{i}: {c['source']} [{c['in']:.1f}-{c['out']:.1f}s]"
+                f"{' +' + c['transition']['type'] if c.get('transition') else ''}"
+            )
+        summary.append("Ask the user to approve or revise. If approved, call "
+                       "render_timeline with approved=true.")
+        if threading.current_thread() is not threading.main_thread():
+            return "\n".join(summary)
         print(f"\n\033[35m[人审] 渲染请求: {path}\033[0m\n  {v}")
         for i, c in enumerate(tl["clips"][:12]):
             print(f"  clip{i}: {c['source']} [{c['in']:.1f}-{c['out']:.1f}s]"

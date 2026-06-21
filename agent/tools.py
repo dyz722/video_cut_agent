@@ -103,7 +103,8 @@ def _validate_timeline(**kw):
 def _render(**kw):
     from action.render import render_request
     return render_request(kw.get("path", "timeline.json"),
-                          background=kw.get("background", True))
+                          background=kw.get("background", True),
+                          approved=kw.get("approved", False))
 
 
 def _review_timeline(**kw):
@@ -295,9 +296,11 @@ TOOLS = [
     {"name": "render_timeline", "description":
         "Render timeline.json into the final video via the deterministic ffmpeg "
         "renderer. Slow -> runs in background by default; you get notified. "
-        "In interactive mode the human may be asked to approve first.",
+        "In interactive mode, call once without approved to request human approval; "
+        "after the user explicitly approves, call again with approved=true.",
      "input_schema": {"type": "object", "properties": {
-         "path": {"type": "string"}, "background": {"type": "boolean"}}}},
+         "path": {"type": "string"}, "background": {"type": "boolean"},
+         "approved": {"type": "boolean"}}}},
     {"name": "review_render", "description":
         "Generate a local HTML review page for a rendered video. The page plays the "
         "output, shows the QC report, lets the user mark issues and notes, and saves "

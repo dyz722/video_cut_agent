@@ -10,10 +10,12 @@ import itertools
 import sys
 import threading
 import time
+import uuid
 
 from . import config
 from .compact import estimate_tokens, microcompact, auto_compact
 from .background import BG
+from .events import EVENTS
 from .todo import TODO
 from .tools import TOOLS, TOOL_HANDLERS, SKILLS
 
@@ -74,8 +76,8 @@ def _status_enabled() -> bool:
 @contextmanager
 def status(title: str):
     """Show a lightweight live status while blocking work is running."""
-    if not _status_enabled():
-        print(f"[status] {title}")
+    EVENTS.emit("status", title)
+    if not _status_enabled() or threading.current_thread() is not threading.main_thread():
         yield
         return
 
@@ -103,6 +105,62 @@ def status(title: str):
 def _shorten(text: str, limit: int = 180) -> str:
     text = str(text).replace("\n", " ").strip()
     return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _block_type(block) -> str:
+    if isinstance(block, dict):
+        return block.get("type", "")
+    return getattr(block, "type", "")
+
+
+def _block_text(block) -> str:
+    if isinstance(block, dict):
+        return str(block.get("text", ""))
+    return str(getattr(block, "text", ""))
+
+
+def assistant_text(content: list) -> str:
+    parts = []
+    for block in content:
+        if _block_type(block) == "text":
+            parts.append(_block_text(block))
+    return "\n".join(p.strip() for p in parts if p.strip())
+
+
+def summarize_tool_intent(name: str, input_data: dict) -> str:
+    if name == "bash":
+        return _shorten(input_data.get("command", ""), 220)
+    if name == "read_file":
+        path = input_data.get("path", "-")
+        limit = input_data.get("limit")
+        offset = input_data.get("offset")
+        window = []
+        if offset is not None:
+            window.append(f"offset={offset}")
+        if limit is not None:
+            window.append(f"limit={limit}")
+        suffix = f" ({', '.join(window)})" if window else ""
+        return f"read {path}{suffix}"
+    if name == "write_file":
+        return f"write {input_data.get('path', '-')}"
+    if name == "edit_file":
+        return f"edit {input_data.get('path', '-')}"
+    if name == "load_skill":
+        return f"load editing knowledge: {input_data.get('name', '-')}"
+    if name == "TodoWrite":
+        return f"update plan with {len(input_data.get('items', []))} items"
+    if name == "render_timeline":
+        approved = "approved" if input_data.get("approved") else "needs approval"
+        return f"render {input_data.get('path', '-')} ({approved})"
+    if name in ("probe_media", "transcribe", "detect_scenes",
+                "validate_timeline", "qc_check", "review_timeline", "review_render"):
+        return f"{name} {input_data.get('path', '-')}"
+    if name == "watch_video":
+        return (f"inspect {input_data.get('path', '-')} "
+                f"{input_data.get('start', '?')}-{input_data.get('end', '?')}s")
+    if name == "task":
+        return _shorten(input_data.get("prompt", ""), 220)
+    return _shorten(input_data, 220)
 
 
 def summarize_tool_result(name: str, input_data: dict, output: str) -> str:
@@ -167,68 +225,106 @@ def set_verbose_tools(enabled: bool):
     VERBOSE_TOOLS = bool(enabled)
 
 
-def agent_loop(messages: list, verbose: bool | None = None):
+def _cancel_requested(cancel_event) -> bool:
+    return bool(cancel_event and cancel_event.is_set())
+
+
+def _cancel_tool_result(block) -> dict:
+    return {"type": "tool_result", "tool_use_id": block.id,
+            "content": "Cancelled by user before this tool was executed."}
+
+
+def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
+               run_id: str | None = None):
     if verbose is None:
         verbose = VERBOSE_TOOLS
+    own_run = not EVENTS.current_run.get("running")
+    run_id = run_id or EVENTS.current_run.get("run_id") or str(uuid.uuid4())[:8]
+    if own_run:
+        EVENTS.start_run(run_id)
     rounds_without_todo = 0
-    while True:
-        microcompact(messages)
-        if estimate_tokens(messages) > config.TOKEN_THRESHOLD:
-            print("[auto-compact triggered]")
-            messages[:] = auto_compact(messages)
-        notifs = BG.drain()
-        if notifs:
-            txt = "\n".join(f"[bg:{n['task_id']}] {n.get('label', '')} {n['status']}: "
-                            f"{n['result']}" for n in notifs)
-            messages.append({"role": "user",
-                             "content": f"<background-results>\n{txt}\n</background-results>"})
-        with status(f"thinking with {config.main_model()} ({config.main_model_protocol()})"):
-            response = config.client().messages.create(
-                model=config.main_model(), system=build_system(),
-                messages=messages, tools=TOOLS, max_tokens=8000)
-        messages.append({"role": "assistant", "content": response.content})
+    try:
+        while True:
+            if _cancel_requested(cancel_event):
+                EVENTS.emit("issue", "agent run stopped before the next model call")
+                return
+            microcompact(messages)
+            if estimate_tokens(messages) > config.TOKEN_THRESHOLD:
+                EVENTS.emit("status", "auto compact triggered")
+                messages[:] = auto_compact(messages)
+            notifs = BG.drain()
+            if notifs:
+                txt = "\n".join(f"[bg:{n['task_id']}] {n.get('label', '')} {n['status']}: "
+                                f"{n['result']}" for n in notifs)
+                for n in notifs:
+                    EVENTS.emit("bg", f"{n.get('label', '')} {n['status']}: "
+                                f"{_shorten(n['result'], 180)}")
+                messages.append({"role": "user",
+                                 "content": f"<background-results>\n{txt}\n</background-results>"})
+            with status(f"thinking with {config.main_model()} ({config.main_model_protocol()})"):
+                response = config.client().messages.create(
+                    model=config.main_model(), system=build_system(),
+                    messages=messages, tools=TOOLS, max_tokens=8000)
+            messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason != "tool_use":
-            # 后台还有活且 agent 停了 -> 批处理模式下等通知再继续
-            if config.AUTO_MODE and BG.has_running():
-                wait_title = "waiting for background tasks"
-                print(f"[{wait_title}]")
-                while BG.has_running() and BG.notifications.empty():
-                    with status(wait_title):
-                        time.sleep(2)
-                continue
-            return
+            text = assistant_text(response.content)
+            if text and response.stop_reason == "tool_use":
+                EVENTS.emit("plan", _shorten(text, 260))
 
-        results = []
-        used_todo = False
-        manual_compress = False
-        for block in response.content:
-            if block.type == "tool_use":
-                if block.name == "compress":
-                    manual_compress = True
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    with status(f"running tool: {block.name}"):
-                        output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {type(e).__name__}: {e}"
-                log_entry = record_tool_log(block.name, block.input, output)
-                if verbose:
-                    print(f"\033[33m> {block.name}\033[0m {str(block.input)[:160]}")
-                    print(f"  {str(output)[:240]}")
-                else:
-                    print(f"✓ {log_entry['summary']}  " +
-                          "\033[2m(use /logs to expand)\033[0m")
-                results.append({"type": "tool_result", "tool_use_id": block.id,
-                                "content": str(output)})
-                if block.name == "TodoWrite":
-                    used_todo = True
-        rounds_without_todo = 0 if used_todo else rounds_without_todo + 1
-        if TODO.has_open_items() and rounds_without_todo >= 3:
-            results.append({"type": "text",
-                            "text": "<reminder>Update your todos.</reminder>"})
-        messages.append({"role": "user", "content": results})
-        if manual_compress:
-            print("[manual compact]")
-            messages[:] = auto_compact(messages)
-            return
+            if response.stop_reason != "tool_use":
+                # 后台还有活且 agent 停了 -> 批处理模式下等通知再继续
+                if config.AUTO_MODE and BG.has_running():
+                    wait_title = "waiting for background tasks"
+                    EVENTS.emit("status", wait_title)
+                    while BG.has_running() and BG.notifications.empty():
+                        if _cancel_requested(cancel_event):
+                            EVENTS.emit("issue", "agent run stopped while waiting for background tasks")
+                            return
+                        with status(wait_title):
+                            time.sleep(2)
+                    continue
+                return
+
+            results = []
+            used_todo = False
+            manual_compress = False
+            for block in response.content:
+                if block.type == "tool_use":
+                    if _cancel_requested(cancel_event):
+                        EVENTS.emit("issue", f"cancelled before tool: {block.name}")
+                        results.append(_cancel_tool_result(block))
+                        continue
+                    if block.name == "compress":
+                        manual_compress = True
+                    handler = TOOL_HANDLERS.get(block.name)
+                    EVENTS.emit("tool", summarize_tool_intent(block.name, block.input),
+                                name=block.name)
+                    try:
+                        with status(f"running tool: {block.name}"):
+                            output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                    except Exception as e:
+                        output = f"Error: {type(e).__name__}: {e}"
+                    log_entry = record_tool_log(block.name, block.input, output)
+                    event_kind = "issue" if str(output).startswith(("Error:", "INVALID",
+                                                                    "HUMAN REJECTED")) else "obs"
+                    EVENTS.emit(event_kind, log_entry["summary"], name=block.name)
+                    if verbose:
+                        print(f"\033[33m> {block.name}\033[0m {str(block.input)[:160]}")
+                        print(f"  {str(output)[:240]}")
+                    results.append({"type": "tool_result", "tool_use_id": block.id,
+                                    "content": str(output)})
+                    if block.name == "TodoWrite":
+                        used_todo = True
+            rounds_without_todo = 0 if used_todo else rounds_without_todo + 1
+            if TODO.has_open_items() and rounds_without_todo >= 3:
+                EVENTS.emit("status", "open todos detected; reminding agent to update plan")
+                results.append({"type": "text",
+                                "text": "<reminder>Update your todos.</reminder>"})
+            messages.append({"role": "user", "content": results})
+            if manual_compress:
+                EVENTS.emit("status", "manual compact requested")
+                messages[:] = auto_compact(messages)
+                return
+    finally:
+        if own_run:
+            EVENTS.finish_run("stopped" if _cancel_requested(cancel_event) else "idle")

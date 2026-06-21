@@ -33,7 +33,7 @@ from agent import config  # noqa: E402
 DEFAULT_REPO_URL = "https://github.com/dyz722/video_cut_agent.git"
 SLASH_COMMANDS = [
     "/model", "/dashscope", "/resume", "/todos", "/bg", "/compact",
-    "/logs", "/verbose", "/help", "/quit",
+    "/logs", "/live", "/status", "/stop", "/verbose", "/help", "/quit",
 ]
 _READLINE = None
 _HISTORY_REGISTERED = False
@@ -104,7 +104,10 @@ def welcome_screen() -> str:
         "/bg      check background jobs",
         "/compact compress context",
         "/logs    inspect hidden tool logs",
-        "Esc      interrupt current run",
+        "/live    show live agent events",
+        "/status  show current run status",
+        "/stop    stop current run",
+        "Ctrl-C   request current run stop",
         "Tab      complete slash commands",
         "Up/Down  browse prompt history",
         "/quit    exit",
@@ -134,9 +137,12 @@ def command_help() -> str:
         "  /logs      查看最近工具调用摘要",
         "  /logs full 展开最近工具输入/输出",
         "  /logs clear 清空工具日志",
+        "  /live      查看最近 agent 运行事件",
+        "  /status    查看当前运行状态",
+        "  /stop      请求停止当前运行中的 agent",
         "  /verbose on|off 切换详细工具输出",
         "  /quit      退出",
-        "  Esc        中断当前运行, 回到输入框继续引导",
+        "  Ctrl-C     运行中请求停止当前 agent, 空闲时退出输入",
         "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
         "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
         "  ? or /help 显示此帮助",
@@ -349,6 +355,7 @@ def repl():
     from agent.loop import agent_loop
     from agent import loop as loop_state
     from agent import session as session_store
+    from agent.events import EVENTS
     from agent.todo import TODO
     from agent.background import BG
     from agent.compact import auto_compact
@@ -363,29 +370,103 @@ def repl():
     session_id = session_store.new_session()
     session_name = "new session"
     history = []
+    run_thread = None
+    cancel_event = None
     print(_color(f"session: {session_id} · use /resume to switch", "2"))
+
+    def is_running() -> bool:
+        return bool(run_thread and run_thread.is_alive())
+
+    def print_latest_assistant():
+        if not history:
+            return
+        content = history[-1].get("content") if isinstance(history[-1], dict) else None
+        if isinstance(content, list):
+            for block in content:
+                if hasattr(block, "text") and block.text:
+                    print(block.text)
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    print(block.get("text", ""))
+
+    def start_agent_run(query: str):
+        nonlocal run_thread, cancel_event, session_name
+        cancel_event = threading.Event()
+        run_id = f"{session_id[-6:]}-{len(history) + 1}"
+        history.append({"role": "user", "content": query})
+        session_store.save_session(session_id, history, session_name)
+
+        def worker():
+            nonlocal session_name
+            EVENTS.start_run(run_id)
+            try:
+                agent_loop(history, cancel_event=cancel_event, run_id=run_id)
+            except Exception as e:
+                session_store.save_session(session_id, history, session_name)
+                EVENTS.emit("issue", f"{type(e).__name__}: {_clip(str(e), 240)}")
+                print(format_cli_error(e))
+                EVENTS.finish_run("error")
+                return
+            if session_name == "new session":
+                session_name = session_store.session_title(history)
+            session_store.save_session(session_id, history, session_name)
+            EVENTS.finish_run("stopped" if cancel_event.is_set() else "idle")
+            if cancel_event.is_set():
+                print("[stopped - 上下文已保留，输入新指令继续]")
+            else:
+                print_latest_assistant()
+                print()
+
+        run_thread = threading.Thread(target=worker, daemon=True)
+        run_thread.start()
+        print(_color("[agent] run started. Use /status, /live, /logs, /bg, /todos, or /stop.", "2"))
+
     while True:
         try:
             if prompt_session:
                 query = prompt_session.prompt()
             else:
-                query = input("\033[36mveoai >> \033[0m")
+                prompt = "\033[36mveoai* >> \033[0m" if is_running() else "\033[36mveoai >> \033[0m"
+                query = input(prompt)
         except (EOFError, KeyboardInterrupt):
+            if is_running() and cancel_event:
+                cancel_event.set()
+                print(EVENTS.request_stop())
+                continue
             break
         q = query.strip()
         if q.lower() in ("q", "quit", "exit", "/quit", ""):
             if q == "":
                 continue
+            if is_running() and cancel_event:
+                cancel_event.set()
+                print(EVENTS.request_stop())
+                run_thread.join()
             break
         if not prompt_session:
             add_repl_history(query)
         if q in ("/help", "?", "/"):
             print(command_help()); continue
+        if q == "/status":
+            print(EVENTS.status_text()); continue
+        if q.startswith("/live"):
+            parts = q.split()
+            limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 20
+            print(EVENTS.render(limit=limit)); continue
+        if q == "/stop":
+            if not is_running() or not cancel_event:
+                print("No agent run is active.")
+            else:
+                cancel_event.set()
+                print(EVENTS.request_stop())
+            continue
         if q == "/todos":
             print(TODO.render()); continue
         if q == "/bg":
             print(BG.check()); continue
         if q.startswith("/resume"):
+            if is_running():
+                print("Agent is running. Use /stop before switching sessions.")
+                continue
             parts = q.split(maxsplit=1)
             if len(parts) == 1:
                 print(session_store.render_sessions())
@@ -423,41 +504,32 @@ def repl():
                 print("usage: /verbose on|off")
             continue
         if q == "/model":
+            if is_running():
+                print("Agent is running. Use /stop before changing the model.")
+                continue
             config.configure_main_model(force=True)
             print(f"[model] current: {config.main_model()}")
             continue
         if q == "/dashscope":
+            if is_running():
+                print("Agent is running. Use /stop before changing DashScope config.")
+                continue
             config.configure_dashscope(force=True)
             print(f"[dashscope] region: {config.dashscope_region()} | "
                   f"base_url: {config.dashscope_base_url()}")
             continue
         if q == "/compact":
+            if is_running():
+                print("Agent is running. Use /stop before compacting context.")
+                continue
             if history:
                 history[:] = auto_compact(history)
                 print("[compacted]")
             continue
-        history.append({"role": "user", "content": query})
-        session_store.save_session(session_id, history, session_name)
-        try:
-            with esc_interrupt_monitor():
-                agent_loop(history)
-        except KeyboardInterrupt:
-            session_store.save_session(session_id, history, session_name)
-            print("\n[interrupted - 上下文已保留，输入新指令继续]")
+        if is_running():
+            print("Agent is running. Use /status, /live, /logs, /bg, /todos, or /stop.")
             continue
-        except Exception as e:
-            session_store.save_session(session_id, history, session_name)
-            print(format_cli_error(e))
-            continue
-        if session_name == "new session":
-            session_name = session_store.session_title(history)
-        session_store.save_session(session_id, history, session_name)
-        content = history[-1]["content"]
-        if isinstance(content, list):
-            for block in content:
-                if hasattr(block, "text"):
-                    print(block.text)
-        print()
+        start_agent_run(query)
 
 
 def batch(task: str):
