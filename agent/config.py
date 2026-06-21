@@ -10,6 +10,7 @@ config.py
 
 import os
 from pathlib import Path
+import sys
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -50,6 +51,32 @@ def _mask(value: str) -> str:
     if len(value) <= 8:
         return "*" * len(value)
     return value[:4] + "..." + value[-4:]
+
+
+def _ensure_cooked_terminal():
+    if not sys.stdin.isatty():
+        return
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[0] |= getattr(termios, "ICRNL", 0)
+        attrs[1] |= getattr(termios, "OPOST", 0)
+        attrs[3] |= (getattr(termios, "ECHO", 0)
+                     | getattr(termios, "ICANON", 0)
+                     | getattr(termios, "ISIG", 0)
+                     | getattr(termios, "IEXTEN", 0))
+        termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+    except Exception:
+        pass
+
+
+def _safe_input(prompt: str) -> str:
+    _ensure_cooked_terminal()
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        return ""
 
 
 def _write_env_values(values: dict[str, str]):
@@ -95,11 +122,9 @@ def _default_model_for(protocol: str) -> str:
 
 
 def _prompt_choice(prompt: str, current: str, choices: dict[str, str]) -> str:
-    labels = " / ".join(f"{k}={v}" for k, v in choices.items())
-    try:
-        value = input(f"{prompt} ({labels}, 当前 {current}, 回车保留): ").strip().lower()
-    except EOFError:
-        return current
+    labels = " / ".join(f"{k}:{v}" for k, v in choices.items()
+                        if k in ("1", "2") or k in ("cn", "intl", "anthropic", "openai"))
+    value = _safe_input(f"{prompt} [{labels}] (当前 {current}, 回车保留): ").lower()
     if not value:
         return current
     return choices.get(value, value)
@@ -182,16 +207,10 @@ def configure_dashscope(force: bool = False):
         key_name = _dashscope_key_name(r)
         current_base = os.getenv(base_name, _dashscope_default_base(r))
         current_key = os.getenv(key_name, os.getenv("DASHSCOPE_API_KEY", ""))
-        try:
-            base = input(f"[DashScope 配置] {label} Base URL "
-                         f"(当前 {current_base}, 回车保留): ").strip() or current_base
-        except EOFError:
-            base = current_base
+        base = _safe_input(f"[DashScope 配置] {label} Base URL "
+                           f"(当前 {current_base}, 回车保留): ") or current_base
         key_hint = f"当前 {_mask(current_key)}, 回车保留" if current_key else "回车跳过"
-        try:
-            key = input(f"[DashScope 配置] {label} API key ({key_hint}): ").strip() or current_key
-        except EOFError:
-            key = current_key
+        key = _safe_input(f"[DashScope 配置] {label} API key ({key_hint}): ") or current_key
         values[base_name] = base
         if key:
             values[key_name] = key
@@ -246,18 +265,18 @@ def configure_main_model(force: bool = False):
         prompt_url = f"[主模型配置] {url_label} (当前 {current_url}, 回车保留): "
     else:
         prompt_url = f"[主模型配置] {url_label} (回车使用官方默认): "
-    base_url = input(prompt_url).strip()
+    base_url = _safe_input(prompt_url)
     if not base_url:
         base_url = current_url
 
     key_hint = f"当前 {_mask(current_key)}, 回车保留" if current_key else "必填"
-    api_key = input(f"[主模型配置] API key ({key_hint}): ").strip()
+    api_key = _safe_input(f"[主模型配置] API key ({key_hint}): ")
     if not api_key:
         api_key = current_key
     if not api_key:
         raise SystemExit("缺少主模型 API key, 退出。")
 
-    model_id = input(f"[主模型配置] 模型 ID (当前 {current_model}, 回车保留): ").strip()
+    model_id = _safe_input(f"[主模型配置] 模型 ID (当前 {current_model}, 回车保留): ")
     if not model_id:
         model_id = current_model or _default_model_for(protocol)
 
