@@ -59,6 +59,8 @@ def main():
     from agent.log_view import open_log_view
     from agent import session as session_store
     from agent.events import RunEvent, format_event
+    from agent import context_memory
+    from agent.compact import compact_threshold, model_context_window
     import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
@@ -71,6 +73,7 @@ def main():
     check("tool schema/handler 一一对应",
           {t["name"] for t in TOOLS} == set(TOOL_HANDLERS.keys()),
           str({t["name"] for t in TOOLS} ^ set(TOOL_HANDLERS.keys())))
+    check("project memory tool registered", "read_project_memory" in TOOL_HANDLERS)
     watch_schema = next(t for t in TOOLS if t["name"] == "watch_video")["input_schema"]
     check("watch_video supports visual mode selection",
           "mode" in watch_schema["properties"]
@@ -127,6 +130,27 @@ def main():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+    old_window = os.environ.get("VEOAI_CONTEXT_WINDOW")
+    old_threshold = os.environ.get("VEOAI_COMPACT_THRESHOLD")
+    try:
+        os.environ.pop("VEOAI_CONTEXT_WINDOW", None)
+        os.environ.pop("VEOAI_COMPACT_THRESHOLD", None)
+        check("Claude context window defaults to 200k",
+              model_context_window("claude-sonnet-4-6") == 200000)
+        os.environ["VEOAI_CONTEXT_WINDOW"] = "300000"
+        check("context window override works", model_context_window("claude") == 300000)
+        check("compact threshold uses safety margin", compact_threshold("claude") == 216000)
+        os.environ["VEOAI_COMPACT_THRESHOLD"] = "12345"
+        check("compact threshold override works", compact_threshold("claude") == 12345)
+    finally:
+        if old_window is None:
+            os.environ.pop("VEOAI_CONTEXT_WINDOW", None)
+        else:
+            os.environ["VEOAI_CONTEXT_WINDOW"] = old_window
+        if old_threshold is None:
+            os.environ.pop("VEOAI_COMPACT_THRESHOLD", None)
+        else:
+            os.environ["VEOAI_COMPACT_THRESHOLD"] = old_threshold
     check("veoai update dry-run", cli.main(["update", "--dry-run"]) == 0)
     splash = cli.welcome_screen()
     check("welcome screen renders", "Welcome back!" in splash and "Shortcuts" in splash)
@@ -198,6 +222,28 @@ def main():
     finally:
         config.PROJECT_DIR = old_project
         shutil.rmtree(tool_proj, ignore_errors=True)
+    memory_proj = Path(tempfile.mkdtemp(prefix="veoai_context_memory_test_"))
+    try:
+        config.set_project(str(memory_proj))
+        context_memory.save_watch_result(
+            memory_proj / "materials" / "a.mp4",
+            0, 4, "确认商品动作", "video", "画面展示剃须刀开机并贴近脸部使用。")
+        cached = context_memory.get_watch_result(memory_proj / "materials" / "a.mp4", 0, 4)
+        summary = context_memory.render_watch_summary()
+        index = context_memory.project_context_index()
+        msgs = [{"role": "user", "content": "[Compressed] continue"}]
+        context_memory.inject_project_memory_if_sparse(msgs)
+        check("watch_video project cache stores observations",
+              cached and "剃须刀" in cached["result"])
+        check("visual cache summary file written",
+              (memory_proj / ".veoai" / "context" / "watch_video.md").exists()
+              and "Visual Observation Cache" in summary)
+        check("project memory injects small index",
+              len(msgs) == 2 and "<project-memory-index>" in msgs[0]["content"]
+              and "watch_video.md" in index)
+    finally:
+        config.PROJECT_DIR = old_project
+        shutil.rmtree(memory_proj, ignore_errors=True)
     check("slash command completion /m", cli.complete_slash_command("/m", 0) == "/model")
     slash_matches = []
     i = 0
@@ -269,6 +315,10 @@ def main():
           ("a.mp4", "b.mp4", "noaudio.mp4", "bgm.mp3", "banner.png")))
     check("symlinked materials are readable",
           "duration:" in perception.probe.probe_media("materials/external_link.mp4"))
+    shutil.rmtree(proj / "analysis", ignore_errors=True)
+    probe_result = perception.probe.probe_media("materials/a.mp4")
+    check("probe_media creates analysis directory",
+          "full json:" in probe_result and (proj / "analysis" / "a.probe.json").exists())
     short_frames = perception.watch.extract_frames(
         mats / "a.mp4", 0, 1, proj / "analysis" / "frames", "short_vl_smoke")
     check("watch_video extracts DashScope minimum sequence frames", len(short_frames) >= 4)

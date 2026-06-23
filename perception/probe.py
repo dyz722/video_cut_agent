@@ -32,6 +32,7 @@ def probe_media(path: str) -> str:
         return f"Error: {e}"
 
     out_path = config.PROJECT_DIR / "analysis" / f"{fp.stem}.probe.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
     fmt = data.get("format", {})

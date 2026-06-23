@@ -155,6 +155,16 @@ def _summarize_review_feedback(**kw):
     return result
 
 
+def _read_project_memory(**kw):
+    from .context_memory import project_context_snapshot, project_context_index, render_watch_summary
+    kind = kw.get("kind", "index")
+    if kind == "visual":
+        return render_watch_summary(kw.get("limit", 80))
+    if kind == "full":
+        return project_context_snapshot(kw.get("limit", 40))
+    return project_context_index()
+
+
 TOOL_HANDLERS = {
     "bash":             lambda **kw: run_bash(kw["command"]),
     "read_file":        lambda **kw: run_read(kw["path"], kw.get("limit"), kw.get("offset")),
@@ -179,6 +189,7 @@ TOOL_HANDLERS = {
     "review_render":    _review_render,
     "qc_check":         _qc,
     "summarize_review_feedback": _summarize_review_feedback,
+    "read_project_memory": _read_project_memory,
 }
 
 TOOLS = [
@@ -341,4 +352,12 @@ TOOLS = [
                       "description": "Scenario for the learned skill, e.g. ecommerce-clip."},
          "record_confirmed": {"type": "boolean",
                               "description": "Persist candidates via record_experience after user confirmation."}}}},
+    {"name": "read_project_memory", "description":
+        "Read durable project context outside the live conversation. Use after resume/compact "
+        "or before repeating expensive visual analysis. kind=index returns paths/counts; "
+        "kind=visual returns cached watch_video observations; kind=full returns both.",
+     "input_schema": {"type": "object", "properties": {
+         "kind": {"type": "string", "enum": ["index", "visual", "full"]},
+         "limit": {"type": "integer",
+                   "description": "Maximum cached visual observations to include."}}}},
 ]

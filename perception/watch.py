@@ -10,6 +10,7 @@ import time
 from typing import Union
 
 from agent import config
+from agent import context_memory
 
 MAX_FRAMES = 8
 MIN_SEQUENCE_FRAMES = 4
@@ -153,19 +154,34 @@ def watch_video(path: str, start: float, end: float, question: str,
     if mode not in ("auto", "video", "frames"):
         return "Error: mode must be auto, video, or frames"
 
+    cached = context_memory.get_watch_result(fp, start, end)
+    if cached:
+        return (f"[watch cache {cached.get('path', fp.name)} "
+                f"{start:.1f}-{end:.1f}s]\n{cached.get('result', '')}")
+
     prefix = f"{fp.stem}_{int(start)}_{int(end)}_{int(time.time()) % 100000}"
     duration = end - start
     if mode == "frames":
-        return _watch_frames(fp, start, end, question, prefix)
+        result = _watch_frames(fp, start, end, question, prefix)
+        if not result.startswith("Error:"):
+            context_memory.save_watch_result(fp, start, end, question, mode, result)
+        return result
 
     if mode == "video" or duration <= DIRECT_VIDEO_MAX_SECONDS:
         ok, result = _watch_video_segment(fp, start, end, question, prefix)
         if ok:
+            context_memory.save_watch_result(fp, start, end, question, "video", result)
             return result
         if mode == "video":
             return (f"Error: direct video VL failed: {result}. "
                     "Retry with mode='frames' or a shorter segment.")
         frame_result = _watch_frames(fp, start, end, question, prefix)
-        return (f"[video mode failed, fell back to frames: {result}]\n{frame_result}")
+        combined = f"[video mode failed, fell back to frames: {result}]\n{frame_result}"
+        if not frame_result.startswith("Error:"):
+            context_memory.save_watch_result(fp, start, end, question, "frames", combined)
+        return combined
 
-    return _watch_frames(fp, start, end, question, prefix)
+    result = _watch_frames(fp, start, end, question, prefix)
+    if not result.startswith("Error:"):
+        context_memory.save_watch_result(fp, start, end, question, "frames", result)
+    return result

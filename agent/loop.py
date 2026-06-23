@@ -13,8 +13,9 @@ import time
 import uuid
 
 from . import config
-from .compact import estimate_tokens, microcompact, auto_compact
+from .compact import estimate_tokens, microcompact, auto_compact, compact_threshold
 from .background import BG
+from . import context_memory
 from .events import EVENTS
 from . import log_store
 from .todo import TODO
@@ -49,6 +50,9 @@ Standard workflow (follow unless the user says otherwise):
 
 Rules:
 - transcript/scenes JSON 用 read_file 的 offset/limit 或 bash grep 查询, 严禁整文件读入。
+- 压缩/恢复后先调用 read_project_memory(kind="index") 查项目级事实索引; 如果需要恢复大量
+  视觉素材认知, 用 task 子 agent 读取 .veoai/context/watch_video.md 并返回压缩素材目录,
+  不要把完整视觉缓存直接塞进主上下文。如果某个素材片段已有视觉观察缓存, 不要重新 watch_video。
 - watch_video 有成本, 只在 transcript/TTS 已理解大部分内容、但某些片段的视觉信息
   无法用语言完整表达时使用, 例如商品动作、人物表情、打斗、画面遮挡、内嵌字幕。
 - watch_video 片段尽量 >=4s; 短片段默认 mode=auto 直接裁视频给 VL, 失败会退回抽帧;
@@ -166,6 +170,8 @@ def summarize_tool_intent(name: str, input_data: dict) -> str:
         return (f"inspect {input_data.get('path', '-')} "
                 f"{input_data.get('start', '?')}-{input_data.get('end', '?')}s "
                 f"({mode}; purpose: {question})")
+    if name == "read_project_memory":
+        return f"read project memory ({input_data.get('kind', 'index')})"
     if name == "task":
         return _shorten(input_data.get("prompt", ""), 220)
     return _shorten(input_data, 220)
@@ -191,6 +197,8 @@ def summarize_tool_result(name: str, input_data: dict, output: str) -> str:
     if name == "qc_check":
         issue_line = next((l for l in output.splitlines() if l.startswith("issues:")), "")
         return issue_line or "qc completed"
+    if name == "read_project_memory":
+        return f"project memory read ({len(output.splitlines())} lines)"
     if output.startswith("Error:"):
         return _shorten(output, 180)
     return f"{name} completed"
@@ -259,9 +267,11 @@ def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
             if _cancel_requested(cancel_event):
                 EVENTS.emit("issue", "agent run stopped before the next model call")
                 return
+            context_memory.inject_project_memory_if_sparse(messages)
             microcompact(messages)
-            if estimate_tokens(messages) > config.TOKEN_THRESHOLD:
-                EVENTS.emit("status", "auto compact triggered")
+            threshold = compact_threshold()
+            if estimate_tokens(messages) > threshold:
+                EVENTS.emit("status", f"auto compact triggered (threshold {threshold})")
                 messages[:] = auto_compact(messages)
             notifs = BG.drain()
             if notifs:
