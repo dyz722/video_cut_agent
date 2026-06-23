@@ -8,6 +8,8 @@ unchanged.
 from dataclasses import dataclass
 import json
 import os
+import random
+import time
 
 import requests
 
@@ -30,6 +32,85 @@ class ToolUseBlock:
 class MessageResponse:
     content: list
     stop_reason: str
+
+
+DEFAULT_RETRY_ATTEMPTS = 10
+
+
+def retry_attempts() -> int:
+    value = os.getenv("VEOAI_API_RETRY_ATTEMPTS", str(DEFAULT_RETRY_ATTEMPTS))
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return DEFAULT_RETRY_ATTEMPTS
+
+
+def _retry_delay(attempt_index: int) -> float:
+    base = float(os.getenv("VEOAI_API_RETRY_BASE_SECONDS", "1"))
+    cap = float(os.getenv("VEOAI_API_RETRY_MAX_SECONDS", "30"))
+    delay = min(cap, base * (2 ** max(attempt_index - 1, 0)))
+    return delay + random.uniform(0, min(0.5, delay * 0.1))
+
+
+def _status_from_exception(exc: Exception) -> int | None:
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(exc, "response", None)
+    value = getattr(response, "status_code", None)
+    return value if isinstance(value, int) else None
+
+
+def is_retryable_error(exc: Exception) -> bool:
+    status = _status_from_exception(exc)
+    if status in (401, 403, 404):
+        return False
+    if status == 429 or (status is not None and status >= 500):
+        return True
+    text = str(exc).lower()
+    fatal_markers = (
+        "invalid api key",
+        "unauthorized",
+        "permission denied",
+        "forbidden",
+        "not found",
+        "model_not_found",
+    )
+    if any(marker in text for marker in fatal_markers):
+        return False
+    retry_markers = (
+        "timeout",
+        "timed out",
+        "temporarily",
+        "connection",
+        "rate limit",
+        "overloaded",
+        "upstream",
+        "502",
+        "503",
+        "504",
+        "internalservererror",
+    )
+    return any(marker in text for marker in retry_markers)
+
+
+def create_message_with_retry(create_fn, *, on_retry=None, **kwargs):
+    attempts = retry_attempts()
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return create_fn(**kwargs)
+        except Exception as exc:
+            last_exc = exc
+            retryable = is_retryable_error(exc)
+            if not retryable or attempt >= attempts:
+                raise
+            delay = _retry_delay(attempt)
+            if on_retry:
+                on_retry(attempt, attempts, delay, exc)
+            time.sleep(delay)
+    raise last_exc
 
 
 def _field(obj, name, default=None):
@@ -163,14 +244,16 @@ class OpenAICompatMessages:
             payload["tools"] = converted_tools
             payload["tool_choice"] = "auto"
         timeout = float(os.getenv("OPENAI_TIMEOUT", "120"))
-        response = requests.post(
-            self.chat_completions_url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=timeout,
+        response = create_message_with_retry(
+            lambda **_: requests.post(
+                self.chat_completions_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=timeout,
+            )
         )
         if response.status_code >= 400:
             raise RuntimeError(f"OpenAI-compatible API error {response.status_code}: "

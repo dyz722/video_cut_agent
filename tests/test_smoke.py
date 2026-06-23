@@ -51,6 +51,9 @@ def main():
         ToolUseBlock,
         anthropic_messages_to_openai,
         anthropic_tools_to_openai,
+        create_message_with_retry,
+        is_retryable_error,
+        retry_attempts,
     )
     import agent.loop  # noqa
     import agent.subagent  # noqa
@@ -112,6 +115,41 @@ def main():
           openai_msgs[0]["role"] == "system"
           and openai_msgs[2]["tool_calls"][0]["function"]["name"] == "demo_tool"
           and openai_msgs[3]["role"] == "tool")
+    old_retry_env = {
+        "VEOAI_API_RETRY_ATTEMPTS": os.environ.get("VEOAI_API_RETRY_ATTEMPTS"),
+        "VEOAI_API_RETRY_BASE_SECONDS": os.environ.get("VEOAI_API_RETRY_BASE_SECONDS"),
+        "VEOAI_API_RETRY_MAX_SECONDS": os.environ.get("VEOAI_API_RETRY_MAX_SECONDS"),
+    }
+    try:
+        os.environ.pop("VEOAI_API_RETRY_ATTEMPTS", None)
+        check("model API retry attempts default to 10", retry_attempts() == 10)
+        check("auth errors are not retryable", not is_retryable_error(RuntimeError("401 Unauthorized")))
+        check("gateway errors are retryable", is_retryable_error(RuntimeError("502 upstream error")))
+        os.environ["VEOAI_API_RETRY_ATTEMPTS"] = "3"
+        os.environ["VEOAI_API_RETRY_BASE_SECONDS"] = "0"
+        os.environ["VEOAI_API_RETRY_MAX_SECONDS"] = "0"
+        calls = {"count": 0}
+
+        def flaky_create(**_):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise RuntimeError("502 temporary upstream error")
+            return "ok"
+
+        retry_events = []
+        result = create_message_with_retry(
+            flaky_create,
+            on_retry=lambda attempt, attempts, delay, exc: retry_events.append(
+                (attempt, attempts, type(exc).__name__)),
+        )
+        check("model API retry succeeds after transient errors",
+              result == "ok" and calls["count"] == 3 and len(retry_events) == 2)
+    finally:
+        for k, v in old_retry_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
     old_dash_env = {k: os.environ.get(k) for k in (
         "DASHSCOPE_REGION", "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY_CN",
         "DASHSCOPE_API_KEY_INTL", "DASHSCOPE_BASE_URL_CN", "DASHSCOPE_BASE_URL_INTL")}

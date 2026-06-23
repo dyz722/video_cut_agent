@@ -6,6 +6,7 @@ run_subagent: 为"分析"而生的子 agent。
 """
 
 from . import config
+from .model_client import create_message_with_retry
 
 SUB_SYSTEM = """You are a video-analysis subagent in project {workdir}.
 Analyze ONLY what the prompt asks. Use read_file to query analysis/transcript.json
@@ -56,7 +57,8 @@ def run_subagent(prompt: str, agent_type: str = "Analyze") -> str:
     sub_msgs = [{"role": "user", "content": prompt}]
     resp = None
     for _ in range(40):
-        resp = config.client().messages.create(
+        resp = create_message_with_retry(
+            config.client().messages.create,
             model=config.main_model(),
             system=SUB_SYSTEM.format(workdir=config.PROJECT_DIR),
             messages=sub_msgs, tools=sub_tools, max_tokens=8000)

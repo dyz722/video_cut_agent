@@ -12,6 +12,7 @@ import time
 
 from . import config
 from . import context_memory
+from .model_client import create_message_with_retry
 
 
 def estimate_tokens(messages: list) -> int:
@@ -68,7 +69,8 @@ def auto_compact(messages: list) -> list:
             f.write(json.dumps(msg, default=str) + "\n")
     project_memory = context_memory.project_context_index()
     conv_text = json.dumps(messages, default=str)[-80000:]
-    resp = config.client().messages.create(
+    resp = create_message_with_retry(
+        config.client().messages.create,
         model=config.main_model(),
         messages=[{"role": "user", "content":
                    "Summarize this video-editing session for continuity. Keep: project goal, "

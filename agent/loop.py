@@ -18,6 +18,7 @@ from .background import BG
 from . import context_memory
 from .events import EVENTS
 from . import log_store
+from .model_client import create_message_with_retry
 from .todo import TODO
 from .tools import TOOLS, TOOL_HANDLERS, SKILLS
 
@@ -253,6 +254,12 @@ def _cancel_tool_result(block) -> dict:
             "content": "Cancelled by user before this tool was executed."}
 
 
+def _emit_model_retry(attempt: int, attempts: int, delay: float, exc: Exception):
+    EVENTS.emit("status",
+                f"model API retry {attempt}/{attempts} in {delay:.1f}s: "
+                f"{type(exc).__name__}: {_shorten(exc, 120)}")
+
+
 def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
                run_id: str | None = None):
     if verbose is None:
@@ -283,7 +290,9 @@ def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
                 messages.append({"role": "user",
                                  "content": f"<background-results>\n{txt}\n</background-results>"})
             with status(f"thinking with {config.main_model()} ({config.main_model_protocol()})"):
-                response = config.client().messages.create(
+                response = create_message_with_retry(
+                    config.client().messages.create,
+                    on_retry=_emit_model_retry,
                     model=config.main_model(), system=build_system(),
                     messages=messages, tools=TOOLS, max_tokens=8000)
             messages.append({"role": "assistant", "content": response.content})
