@@ -15,7 +15,7 @@ import sys
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-from .model_client import OpenAICompatClient
+from .model_client import OpenAICompatClient, request_timeout_seconds
 
 ROOT = Path(__file__).resolve().parent.parent
 USER_DATA_DIR = Path(os.getenv("VIDEO_AGENT_HOME", "~/.video-agent")).expanduser()
@@ -344,7 +344,8 @@ def client():
             _client = OpenAICompatClient(os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
                                          key)
         else:
-            _client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL") or None)
+            _client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL") or None,
+                                timeout=request_timeout_seconds())
     return _client
 
 

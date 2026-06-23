@@ -53,6 +53,7 @@ def main():
         anthropic_tools_to_openai,
         create_message_with_retry,
         is_retryable_error,
+        request_timeout_seconds,
         retry_attempts,
     )
     import agent.loop  # noqa
@@ -119,10 +120,13 @@ def main():
         "VEOAI_API_RETRY_ATTEMPTS": os.environ.get("VEOAI_API_RETRY_ATTEMPTS"),
         "VEOAI_API_RETRY_BASE_SECONDS": os.environ.get("VEOAI_API_RETRY_BASE_SECONDS"),
         "VEOAI_API_RETRY_MAX_SECONDS": os.environ.get("VEOAI_API_RETRY_MAX_SECONDS"),
+        "VEOAI_API_TIMEOUT": os.environ.get("VEOAI_API_TIMEOUT"),
     }
     try:
         os.environ.pop("VEOAI_API_RETRY_ATTEMPTS", None)
+        os.environ["VEOAI_API_TIMEOUT"] = "7"
         check("model API retry attempts default to 10", retry_attempts() == 10)
+        check("model API timeout configurable", request_timeout_seconds() == 7)
         check("auth errors are not retryable", not is_retryable_error(RuntimeError("401 Unauthorized")))
         check("gateway errors are retryable", is_retryable_error(RuntimeError("502 upstream error")))
         os.environ["VEOAI_API_RETRY_ATTEMPTS"] = "3"
@@ -137,13 +141,16 @@ def main():
             return "ok"
 
         retry_events = []
+        attempt_events = []
         result = create_message_with_retry(
             flaky_create,
+            on_attempt=lambda attempt, attempts: attempt_events.append((attempt, attempts)),
             on_retry=lambda attempt, attempts, delay, exc: retry_events.append(
                 (attempt, attempts, type(exc).__name__)),
         )
         check("model API retry succeeds after transient errors",
-              result == "ok" and calls["count"] == 3 and len(retry_events) == 2)
+              result == "ok" and calls["count"] == 3 and len(retry_events) == 2
+              and attempt_events == [(1, 3), (2, 3), (3, 3)])
     finally:
         for k, v in old_retry_env.items():
             if v is None:
@@ -205,6 +212,18 @@ def main():
         EVENTS.clear()
         EVENTS.emit("tool", "probe materials/a.mp4", name="probe_media", print_event=False)
         check("live events render", "probe materials/a.mp4" in EVENTS.render())
+        check("run events persisted",
+              log_store.read_jsonl(log_store.EVENT_LOG)[-1]["summary"] == "probe materials/a.mp4")
+        EVENTS.start_run("stop-smoke")
+        first_stop = EVENTS.request_stop()
+        event_count_after_first_stop = len(EVENTS.render(limit=20).splitlines())
+        second_stop = EVENTS.request_stop()
+        event_count_after_second_stop = len(EVENTS.render(limit=20).splitlines())
+        EVENTS.finish_run("stopped")
+        check("repeated stop requests do not spam events",
+              "Stop requested" in first_stop
+              and "already requested" in second_stop
+              and event_count_after_first_stop == event_count_after_second_stop)
         old_no_color = os.environ.get("NO_COLOR")
         os.environ["NO_COLOR"] = "1"
         try:
@@ -219,8 +238,6 @@ def main():
                 os.environ.pop("NO_COLOR", None)
             else:
                 os.environ["NO_COLOR"] = old_no_color
-        check("run events persisted",
-              log_store.read_jsonl(log_store.EVENT_LOG)[-1]["summary"] == "probe materials/a.mp4")
         agent.loop.clear_tool_logs()
         agent.loop.record_tool_log("bash", {"command": "ls"}, "a\nb\n")
         check("tool logs persisted",

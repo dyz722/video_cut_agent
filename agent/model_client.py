@@ -45,6 +45,18 @@ def retry_attempts() -> int:
         return DEFAULT_RETRY_ATTEMPTS
 
 
+def request_timeout_seconds() -> float:
+    for name in ("VEOAI_API_TIMEOUT", "ANTHROPIC_TIMEOUT", "OPENAI_TIMEOUT"):
+        value = os.getenv(name)
+        if not value:
+            continue
+        try:
+            return max(1.0, float(value))
+        except ValueError:
+            pass
+    return 120.0
+
+
 def _retry_delay(attempt_index: int) -> float:
     base = float(os.getenv("VEOAI_API_RETRY_BASE_SECONDS", "1"))
     cap = float(os.getenv("VEOAI_API_RETRY_MAX_SECONDS", "30"))
@@ -95,11 +107,13 @@ def is_retryable_error(exc: Exception) -> bool:
     return any(marker in text for marker in retry_markers)
 
 
-def create_message_with_retry(create_fn, *, on_retry=None, **kwargs):
+def create_message_with_retry(create_fn, *, on_retry=None, on_attempt=None, **kwargs):
     attempts = retry_attempts()
     last_exc = None
     for attempt in range(1, attempts + 1):
         try:
+            if on_attempt:
+                on_attempt(attempt, attempts)
             return create_fn(**kwargs)
         except Exception as exc:
             last_exc = exc
@@ -243,7 +257,7 @@ class OpenAICompatMessages:
         if converted_tools:
             payload["tools"] = converted_tools
             payload["tool_choice"] = "auto"
-        timeout = float(os.getenv("OPENAI_TIMEOUT", "120"))
+        timeout = request_timeout_seconds()
         response = create_message_with_retry(
             lambda **_: requests.post(
                 self.chat_completions_url,

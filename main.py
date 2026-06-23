@@ -108,7 +108,7 @@ def welcome_screen() -> str:
         "/live    show live agent events",
         "/status  show current run status",
         "/stop    stop current run",
-        "Ctrl-C   request current run stop",
+        "Ctrl-C   request current run stop; press again to leave REPL",
         "Tab      complete slash commands",
         "Up/Down  browse prompt history",
         "/quit    exit",
@@ -144,7 +144,7 @@ def command_help() -> str:
         "  /stop      请求停止当前运行中的 agent",
         "  /verbose on|off 切换详细工具输出",
         "  /quit      退出",
-        "  Ctrl-C     运行中请求停止当前 agent, 空闲时退出输入",
+        "  Ctrl-C     运行中第一次请求停止当前 agent, 第二次直接退出 REPL",
         "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
         "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
         "  ? or /help 显示此帮助",
@@ -455,6 +455,9 @@ def repl():
                 query = input(prompt)
         except (EOFError, KeyboardInterrupt):
             if is_running() and cancel_event:
+                if cancel_event.is_set():
+                    print("[exit] Leaving REPL; blocked agent call may finish in the background.")
+                    break
                 cancel_event.set()
                 print(EVENTS.request_stop())
                 continue
@@ -466,7 +469,6 @@ def repl():
             if is_running() and cancel_event:
                 cancel_event.set()
                 print(EVENTS.request_stop())
-                run_thread.join()
             break
         if not prompt_session:
             add_repl_history(query)
