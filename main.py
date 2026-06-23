@@ -108,7 +108,7 @@ def welcome_screen() -> str:
         "/live    show live agent events",
         "/status  show current run status",
         "/stop    stop current run",
-        "Ctrl-C   request current run stop; press again to leave REPL",
+        "Ctrl-C   request current run stop; press again to force exit",
         "Tab      complete slash commands",
         "Up/Down  browse prompt history",
         "/quit    exit",
@@ -144,7 +144,7 @@ def command_help() -> str:
         "  /stop      请求停止当前运行中的 agent",
         "  /verbose on|off 切换详细工具输出",
         "  /quit      退出",
-        "  Ctrl-C     运行中第一次请求停止当前 agent, 第二次直接退出 REPL",
+        "  Ctrl-C     运行中第一次请求停止当前 agent, 第二次强制退出进程",
         "  Tab        补全斜杠命令, 例如 /m + Tab -> /model",
         "  ↑ / ↓      找回上一条/下一条输入, 可编辑后快速重发",
         "  ? or /help 显示此帮助",
@@ -380,6 +380,13 @@ def repl():
     def is_running() -> bool:
         return bool(run_thread and run_thread.is_alive())
 
+    def force_exit_running_agent():
+        if cancel_event:
+            cancel_event.set()
+        print("[exit] Force exiting veoai; blocked agent call is terminated with this process.")
+        _save_readline_history()
+        os._exit(130)
+
     def print_latest_assistant():
         if not history:
             return
@@ -456,8 +463,7 @@ def repl():
         except (EOFError, KeyboardInterrupt):
             if is_running() and cancel_event:
                 if cancel_event.is_set():
-                    print("[exit] Leaving REPL; blocked agent call may finish in the background.")
-                    break
+                    force_exit_running_agent()
                 cancel_event.set()
                 print(EVENTS.request_stop())
                 continue
@@ -467,8 +473,7 @@ def repl():
             if q == "":
                 continue
             if is_running() and cancel_event:
-                cancel_event.set()
-                print(EVENTS.request_stop())
+                force_exit_running_agent()
             break
         if not prompt_session:
             add_repl_history(query)

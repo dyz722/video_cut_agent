@@ -96,7 +96,7 @@ class RunEventBus:
                 return "No agent run is active."
             if self.current_run.get("stop_requested"):
                 return ("Stop already requested. The current blocking API/tool call may finish "
-                        "first; press Ctrl-C again or /quit to exit the REPL.")
+                        "first; press Ctrl-C again or /quit to force exit the process.")
             self.current_run["stop_requested"] = True
             run_id = self.current_run.get("run_id", "")
         self.emit("issue", "stop requested; will halt after the current model/tool call",

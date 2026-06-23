@@ -199,6 +199,7 @@ def main():
     check("veoai update dry-run", cli.main(["update", "--dry-run"]) == 0)
     splash = cli.welcome_screen()
     check("welcome screen renders", "Welcome back!" in splash and "Shortcuts" in splash)
+    check("welcome screen documents force exit", "force exit" in splash)
     err = cli.format_cli_error(RuntimeError(
         'OpenAI-compatible API error 502: {"error":{"message":"Upstream access forbidden"}}'))
     check("model API error is user friendly", "/model" in err and "没有退出" in err)
@@ -223,6 +224,7 @@ def main():
         check("repeated stop requests do not spam events",
               "Stop requested" in first_stop
               and "already requested" in second_stop
+              and "force exit" in second_stop
               and event_count_after_first_stop == event_count_after_second_stop)
         old_no_color = os.environ.get("NO_COLOR")
         os.environ["NO_COLOR"] = "1"
