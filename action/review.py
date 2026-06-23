@@ -34,6 +34,10 @@ def _safe_review_dir(review: str) -> Path:
     return target
 
 
+def _url_path(rel_path: str) -> str:
+    return "/" + "/".join(urllib.parse.quote(part) for part in rel_path.split("/"))
+
+
 def _write_json(path: Path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -388,7 +392,7 @@ def review_timeline(path: str = "timeline.json", open_browser: bool = True,
                 f"Open it after serving the project directory, or call with start_server=true.")
 
     port = _ensure_server()
-    url = f"http://127.0.0.1:{port}/{review_rel}/index.html"
+    url = f"http://127.0.0.1:{port}{_url_path(review_rel + '/index.html')}"
     if open_browser:
         webbrowser.open(url)
     return (f"Timeline review ready: {url}\n"
@@ -398,7 +402,7 @@ def review_timeline(path: str = "timeline.json", open_browser: bool = True,
 
 
 def _render_output_review_html(path: str, review_rel: str, qc_report: str) -> str:
-    video_url = "/" + urllib.parse.quote(path)
+    video_url = _url_path(path)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -520,7 +524,7 @@ def review_render(path: str, qc_report: str = "", open_browser: bool = True,
                 f"Open it after serving the project directory, or call with start_server=true.")
 
     port = _ensure_server()
-    url = f"http://127.0.0.1:{port}/{review_rel}/index.html"
+    url = f"http://127.0.0.1:{port}{_url_path(review_rel + '/index.html')}"
     if open_browser:
         webbrowser.open(url)
     return (f"Render review ready: {url}\n"

@@ -1,8 +1,8 @@
 # Perception: hearing -- 转写稿是视频的文本索引, agent 靠它定位 90% 的剪辑点.
 """
 transcribe: DashScope fun-asr 语音转写, 句级时间戳。
-    本地文件 -> ffmpeg 抽 16k 单声道 wav -> fun-asr-realtime 识别
-    http(s) URL -> fun-asr 录音文件识别 (异步任务)
+    本地文件 -> ffmpeg 抽 16k 单声道 wav -> qwen3-asr-flash 识别
+    http(s) URL -> fun-asr / qwen3-asr-flash-filetrans 录音文件识别 (异步任务)
 产物:
     analysis/<name>.transcript.json   结构化 (秒级时间戳)
     analysis/<name>.transcript.txt    "[12.50-15.20] 文本" 行格式, 方便 grep
@@ -10,6 +10,7 @@ transcribe: DashScope fun-asr 语音转写, 句级时间戳。
 
 import json
 import subprocess
+from pathlib import Path
 
 from agent import config
 
@@ -21,37 +22,101 @@ def _extract_audio(video_path, wav_path):
         capture_output=True, text=True, timeout=1800, check=True)
 
 
-def _recognize_local(wav_path) -> list:
-    """fun-asr-realtime 识别本地 wav, 返回 [{start,end,text}] (秒)。"""
-    import dashscope
-    from dashscope.audio.asr import Recognition
-
-    config.apply_dashscope_config()
-    rec = Recognition(model=config.asr_realtime_model(), format="wav",
-                      sample_rate=16000, callback=None)
-    result = rec.call(str(wav_path))
-    if result.status_code != 200:
-        raise RuntimeError(f"ASR failed: {result.status_code} {result.message}")
+def _sentences_from_transcription_json(data: dict) -> list:
     sentences = []
-    for s in (result.get_sentence() or []):
-        if not s.get("text"):
-            continue
-        sentences.append({
-            "start": round(s.get("begin_time", 0) / 1000, 2),
-            "end": round(s.get("end_time", 0) / 1000, 2),
-            "text": s["text"].strip(),
-        })
+    for tr in data.get("transcripts", []):
+        for s in tr.get("sentences", []):
+            text = (s.get("text") or "").strip()
+            if not text:
+                continue
+            sentences.append({
+                "start": round(s.get("begin_time", 0) / 1000, 2),
+                "end": round(s.get("end_time", 0) / 1000, 2),
+                "text": text,
+            })
     return sentences
 
 
-def _recognize_url(url: str) -> list:
-    """fun-asr 录音文件识别 (公网 URL, 异步任务)。"""
+def _extract_asr_text(response) -> str:
+    output = getattr(response, "output", None)
+    if isinstance(output, dict):
+        choices = output.get("choices") or []
+    else:
+        choices = getattr(output, "choices", []) if output is not None else []
+    parts = []
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else getattr(choice, "message", None)
+        content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("content") or ""))
+                else:
+                    parts.append(str(getattr(item, "text", "") or getattr(item, "content", "")))
+    return "".join(p for p in parts if p).strip()
+
+
+def _audio_duration_seconds(path: Path) -> float:
+    from perception.probe import media_duration
+    try:
+        return media_duration(path)
+    except Exception:
+        return 0.0
+
+
+def _recognize_local(wav_path) -> list:
+    """qwen3-asr-flash 识别本地 wav, 返回 [{start,end,text}] (秒)。"""
     import dashscope
-    import requests
-    from dashscope.audio.asr import Transcription
 
     config.apply_dashscope_config()
-    task = Transcription.async_call(model=config.asr_file_model(), file_urls=[url])
+    response = dashscope.MultiModalConversation.call(
+        api_key=config.dashscope_api_key(),
+        model=config.asr_local_model(),
+        messages=[{"role": "user", "content": [{"audio": f"file://{Path(wav_path).resolve()}"}]}],
+        result_format="message",
+        asr_options={"enable_itn": False},
+    )
+    if getattr(response, "status_code", 200) != 200:
+        raise RuntimeError(f"ASR failed: {response.status_code} {getattr(response, 'message', '')}")
+    text = _extract_asr_text(response)
+    if not text:
+        raise RuntimeError(f"ASR returned empty text: {response}")
+    return [{"start": 0.0, "end": round(_audio_duration_seconds(Path(wav_path)), 2), "text": text}]
+
+
+def _recognize_url(url: str) -> list:
+    """fun-asr / qwen3-asr-flash-filetrans 录音文件识别 (公网 URL, 异步任务)。"""
+    import dashscope
+    import requests
+
+    config.apply_dashscope_config()
+    model = config.asr_file_model()
+    if model.startswith("qwen3-asr"):
+        try:
+            from dashscope.audio.qwen_asr import QwenTranscription
+        except Exception as e:
+            raise RuntimeError(f"dashscope qwen_asr SDK unavailable: {e}")
+        task = QwenTranscription.async_call(
+            model=model, file_url=url, enable_itn=False, enable_words=False)
+        result = QwenTranscription.wait(task=task.output.task_id)
+        if result.status_code != 200:
+            raise RuntimeError(f"ASR failed: {result.status_code} {result.message}")
+        output = getattr(result, "output", None)
+        task_result = output.get("result") if isinstance(output, dict) else getattr(output, "result", None)
+        if not task_result:
+            task_result = getattr(result, "result", None)
+        transcription_url = (task_result.get("transcription_url") if isinstance(task_result, dict)
+                             else getattr(task_result, "transcription_url", None))
+        if not transcription_url:
+            raise RuntimeError(f"ASR result missing transcription_url: {result}")
+        data = requests.get(transcription_url, timeout=60).json()
+        return _sentences_from_transcription_json(data)
+
+    from dashscope.audio.asr import Transcription
+    task = Transcription.async_call(
+        model=model, file_urls=[url], language_hints=["zh", "en"])
     result = Transcription.wait(task=task.output.task_id)
     if result.status_code != 200:
         raise RuntimeError(f"ASR failed: {result.status_code} {result.message}")
@@ -60,13 +125,7 @@ def _recognize_url(url: str) -> list:
         if item.get("subtask_status") != "SUCCEEDED":
             raise RuntimeError(f"ASR subtask failed: {item}")
         data = requests.get(item["transcription_url"], timeout=60).json()
-        for tr in data.get("transcripts", []):
-            for s in tr.get("sentences", []):
-                sentences.append({
-                    "start": round(s.get("begin_time", 0) / 1000, 2),
-                    "end": round(s.get("end_time", 0) / 1000, 2),
-                    "text": s.get("text", "").strip(),
-                })
+        sentences.extend(_sentences_from_transcription_json(data))
     return sentences
 
 
@@ -92,6 +151,7 @@ def transcribe(path: str) -> str:
     analysis = config.PROJECT_DIR / "analysis"
     json_path = analysis / f"{name}.transcript.json"
     txt_path = analysis / f"{name}.transcript.txt"
+    analysis.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(
         {"source": path, "sentence_count": len(sentences), "sentences": sentences},
         ensure_ascii=False, indent=1))

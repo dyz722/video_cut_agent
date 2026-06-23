@@ -322,8 +322,12 @@ def asr_file_model() -> str:
     return os.getenv("ASR_FILE_MODEL", "fun-asr")            # 录音文件识别 (需公网 URL)
 
 
+def asr_local_model() -> str:
+    return os.getenv("ASR_LOCAL_MODEL", "qwen3-asr-flash")   # 本地短音频识别 (<=5min)
+
+
 def asr_realtime_model() -> str:
-    return os.getenv("ASR_REALTIME_MODEL", "fun-asr-realtime")  # 本地文件流式识别
+    return os.getenv("ASR_REALTIME_MODEL", asr_local_model())  # backward-compatible alias
 
 
 def tts_model() -> str:

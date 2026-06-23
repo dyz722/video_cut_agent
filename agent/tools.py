@@ -263,9 +263,10 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}},
                       "required": ["path"]}},
     {"name": "transcribe", "description":
-        "ASR transcription (DashScope fun-asr) with sentence timestamps -> "
-        "analysis/<name>.transcript.json. The primary index for finding cut points. "
-        "Set background=true for videos longer than ~10 min.",
+        "ASR transcription -> analysis/<name>.transcript.json. Local files use "
+        "DashScope qwen3-asr-flash; public URLs use async fun-asr/qwen3 file "
+        "transcription depending on ASR_FILE_MODEL. The primary index for finding "
+        "cut points. Set background=true for videos longer than ~10 min.",
      "input_schema": {"type": "object", "properties": {
          "path": {"type": "string"}, "background": {"type": "boolean"}},
          "required": ["path"]}},

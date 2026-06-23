@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import types
 import urllib.parse
 from pathlib import Path
 
@@ -69,7 +70,7 @@ def main():
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
     from action import timeline as tl_mod
-    from action.review import review_timeline, review_render, summarize_review_feedback
+    from action.review import review_timeline, review_render, summarize_review_feedback, _url_path
     from action.render import render_file, render_request
     from action.qc import qc_check
     from action.ass_effects import build_ass
@@ -169,6 +170,8 @@ def main():
               config.dashscope_base_url() == "https://dashscope-intl.example/api/v1")
         check("DashScope TTS URL derived",
               config.dashscope_tts_url().endswith("/services/audio/tts/SpeechSynthesizer"))
+        check("DashScope local ASR defaults to qwen3-asr-flash",
+              config.asr_local_model() == "qwen3-asr-flash")
     finally:
         for k, v in old_dash_env.items():
             if v is None:
@@ -382,6 +385,48 @@ def main():
     short_clip = perception.watch.extract_video_segment(
         mats / "a.mp4", 0, 1, proj / "analysis" / "vl_segments", "short_vl_smoke")
     check("watch_video can create direct VL video segment", short_clip.exists())
+    old_asr_env = {k: os.environ.get(k) for k in (
+        "DASHSCOPE_API_KEY", "DASHSCOPE_REGION", "ASR_LOCAL_MODEL")}
+    old_dashscope_module = sys.modules.get("dashscope")
+    asr_calls = []
+    try:
+        os.environ["DASHSCOPE_API_KEY"] = "test-key"
+        os.environ["DASHSCOPE_REGION"] = "cn"
+        os.environ.pop("ASR_LOCAL_MODEL", None)
+
+        class FakeMultiModalConversation:
+            @staticmethod
+            def call(**kwargs):
+                asr_calls.append(kwargs)
+                return types.SimpleNamespace(
+                    status_code=200,
+                    output={"choices": [{
+                        "message": {"content": [{"text": "测试转写文本"}]}
+                    }]},
+                )
+
+        sys.modules["dashscope"] = types.SimpleNamespace(
+            MultiModalConversation=FakeMultiModalConversation)
+        transcribed = perception.transcribe.transcribe("materials/a.mp4")
+        transcript_json = proj / "analysis" / "a.transcript.json"
+        check("local ASR uses qwen3-asr-flash file URI",
+              "测试转写文本" in transcribed
+              and asr_calls
+              and asr_calls[0]["model"] == "qwen3-asr-flash"
+              and asr_calls[0]["messages"][0]["content"][0]["audio"].startswith("file://"))
+        check("local ASR transcript saved",
+              transcript_json.exists()
+              and json.loads(transcript_json.read_text())["sentences"][0]["text"] == "测试转写文本")
+    finally:
+        for k, v in old_asr_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if old_dashscope_module is None:
+            sys.modules.pop("dashscope", None)
+        else:
+            sys.modules["dashscope"] = old_dashscope_module
 
     print("[3b] sessions")
     sid1 = session_store.new_session()
@@ -499,6 +544,10 @@ def main():
     render_review_dir = proj / "review" / "render_smoke"
     check("review_render generates html", (render_review_dir / "index.html").exists(), rr)
     check("review_render stores input", (render_review_dir / "render_input.json").exists(), rr)
+    encoded = _url_path("review/render_飞利浦S3000_¥¬°U°#/index.html")
+    check("review URLs encode unicode and hash safely",
+          encoded.startswith("/review/render_%E9%A3%9E%E5%88%A9%E6%B5%A6S3000_")
+          and "%23/index.html" in encoded)
     (render_review_dir / "render_review_log.json").write_text(json.dumps({
         "kind": "render",
         "status": "needs_revision",
