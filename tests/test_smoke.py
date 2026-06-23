@@ -58,6 +58,7 @@ def main():
     from agent import log_store
     from agent.log_view import open_log_view
     from agent import session as session_store
+    from agent.events import RunEvent, format_event
     import main as cli
     from agent.tools import TOOLS, TOOL_HANDLERS
     import perception.probe, perception.scenes, perception.transcribe, perception.watch  # noqa
@@ -74,6 +75,13 @@ def main():
     check("watch_video supports visual mode selection",
           "mode" in watch_schema["properties"]
           and set(watch_schema["properties"]["mode"]["enum"]) == {"auto", "video", "frames"})
+    check("watch_video accepts timestamp strings",
+          "anyOf" in watch_schema["properties"]["start"]
+          and "anyOf" in watch_schema["properties"]["end"])
+    check("watch_video parses flexible timestamps",
+          perception.watch.seconds("9.5s") == 9.5
+          and perception.watch.seconds("00:01:02.5") == 62.5
+          and perception.watch.seconds("3秒") == 3.0)
     pyproject = (ROOT / "pyproject.toml").read_text()
     check("veoai CLI entry registered", 'veoai = "main:main"' in pyproject)
     check("legacy CLI aliases removed",
@@ -135,6 +143,20 @@ def main():
         EVENTS.clear()
         EVENTS.emit("tool", "probe materials/a.mp4", name="probe_media", print_event=False)
         check("live events render", "probe materials/a.mp4" in EVENTS.render())
+        old_no_color = os.environ.get("NO_COLOR")
+        os.environ["NO_COLOR"] = "1"
+        try:
+            plan_line = format_event(RunEvent(1, "12:00:00", "plan", "检查素材并确认用途"))
+            tool_line = format_event(RunEvent(2, "12:00:01", "tool", "probe materials/a.mp4",
+                                              name="probe_media"))
+            check("terminal events use readable labels",
+                  "计划 检查素材" in plan_line
+                  and "工具 probe_media probe materials/a.mp4" in tool_line)
+        finally:
+            if old_no_color is None:
+                os.environ.pop("NO_COLOR", None)
+            else:
+                os.environ["NO_COLOR"] = old_no_color
         check("run events persisted",
               log_store.read_jsonl(log_store.EVENT_LOG)[-1]["summary"] == "probe materials/a.mp4")
         agent.loop.clear_tool_logs()

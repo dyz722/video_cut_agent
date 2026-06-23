@@ -272,8 +272,12 @@ TOOLS = [
         "forces direct segment video input. Use segments of at least ~4 seconds. "
         "Costs money -- do not retry the same failing call repeatedly.",
      "input_schema": {"type": "object", "properties": {
-         "path": {"type": "string"}, "start": {"type": "number"},
-         "end": {"type": "number"}, "question": {"type": "string"},
+         "path": {"type": "string"},
+         "start": {"anyOf": [{"type": "number"}, {"type": "string"}],
+                   "description": "Start time in seconds, e.g. 12.5, '12.5s', or '00:12.5'."},
+         "end": {"anyOf": [{"type": "number"}, {"type": "string"}],
+                 "description": "End time in seconds, e.g. 18, '18s', or '00:18'."},
+         "question": {"type": "string"},
          "mode": {"type": "string", "enum": ["auto", "video", "frames"]}},
          "required": ["path", "start", "end", "question"]}},
     # -- 行动层 --

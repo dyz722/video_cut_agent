@@ -6,6 +6,7 @@ which issue or next action is visible from the run.
 """
 
 from dataclasses import dataclass, asdict
+import os
 import threading
 import time
 
@@ -137,8 +138,36 @@ def _shorten(text: str, limit: int) -> str:
 
 def format_event(event: RunEvent, include_seq: bool = False) -> str:
     prefix = f"{event.seq}. " if include_seq else ""
+    label = _event_label(event.kind)
     name = f" {event.name}" if event.name else ""
-    return f"{prefix}[{event.ts}] [{event.kind}]{name} {event.summary}"
+    line = f"{prefix}[{event.ts}] {label}{name} {event.summary}"
+    return _colorize(event.kind, line)
+
+
+def _event_label(kind: str) -> str:
+    return {
+        "plan": "计划",
+        "tool": "工具",
+        "obs": "结果",
+        "status": "状态",
+        "issue": "问题",
+        "bg": "后台",
+    }.get(kind, kind)
+
+
+def _colorize(kind: str, line: str) -> str:
+    if os.environ.get("NO_COLOR"):
+        return line
+    styles = {
+        "plan": "\033[1;36m",
+        "issue": "\033[1;31m",
+        "tool": "\033[2m",
+        "obs": "\033[2m",
+        "status": "\033[2m",
+        "bg": "\033[2m",
+    }
+    style = styles.get(kind)
+    return f"{style}{line}\033[0m" if style else line
 
 
 def event_to_dict(event: RunEvent) -> dict:

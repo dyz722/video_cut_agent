@@ -7,12 +7,34 @@ endpoint/model 不支持本地视频片段, 自动退回多帧序列。产物落
 from pathlib import Path
 import subprocess
 import time
+from typing import Union
 
 from agent import config
 
 MAX_FRAMES = 8
 MIN_SEQUENCE_FRAMES = 4
 DIRECT_VIDEO_MAX_SECONDS = 120
+VL_VIDEO_FPS = 2
+
+
+def seconds(value: Union[str, int, float]) -> float:
+    """Accept agent-friendly time strings such as 12s, 00:12, or 01:02:03."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().lower().replace("秒", "s")
+    if not text:
+        raise ValueError("empty timestamp")
+    if text.endswith("s"):
+        text = text[:-1].strip()
+    if ":" in text:
+        parts = [float(p) for p in text.split(":")]
+        if len(parts) > 3:
+            raise ValueError(f"invalid timestamp: {value}")
+        total = 0.0
+        for part in parts:
+            total = total * 60 + part
+        return total
+    return float(text)
 
 
 def extract_frames(fp, start: float, end: float, out_dir, prefix: str,
@@ -48,7 +70,7 @@ def _call_vl_with_video(video_path: Path, fp: Path, start: float, end: float,
 
     config.apply_dashscope_config()
     messages = [{"role": "user", "content": [
-        {"video": f"file://{video_path}"},
+        {"video": f"file://{video_path}", "fps": VL_VIDEO_FPS},
         {"text": (f"这是视频 {fp.name} 第 {start:.1f}s-{end:.1f}s 的片段。"
                   f"{question}\n回答时尽量给出对应的时间点(秒)。")},
     ]}]
@@ -65,8 +87,9 @@ def _call_vl_with_frames(frames: list[Path], fp: Path, start: float, end: float,
     import dashscope
 
     config.apply_dashscope_config()
+    fps = round(len(frames) / max(end - start, 0.1), 3)
     messages = [{"role": "user", "content": [
-        {"video": [f"file://{f}" for f in frames]},
+        {"video": [f"file://{f}" for f in frames], "fps": fps},
         {"text": (f"这是视频 {fp.name} 第 {start:.1f}s-{end:.1f}s 的等间隔抽帧"
                   f"(共{len(frames)}帧, 按时间顺序)。{question}\n"
                   f"回答时尽量给出对应的时间点(秒)。")},
@@ -117,6 +140,11 @@ def watch_video(path: str, start: float, end: float, question: str,
     fp = config.safe_path(path)
     if not fp.exists():
         return f"Error: file not found: {path}"
+    try:
+        start = seconds(start)
+        end = seconds(end)
+    except Exception as e:
+        return f"Error: invalid start/end timestamp: {e}"
     if end <= start:
         return "Error: end must be > start"
     if end - start > 600:

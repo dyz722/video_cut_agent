@@ -161,8 +161,11 @@ def summarize_tool_intent(name: str, input_data: dict) -> str:
                 "validate_timeline", "qc_check", "review_timeline", "review_render"):
         return f"{name} {input_data.get('path', '-')}"
     if name == "watch_video":
+        mode = input_data.get("mode", "auto")
+        question = _shorten(input_data.get("question", ""), 80)
         return (f"inspect {input_data.get('path', '-')} "
-                f"{input_data.get('start', '?')}-{input_data.get('end', '?')}s")
+                f"{input_data.get('start', '?')}-{input_data.get('end', '?')}s "
+                f"({mode}; purpose: {question})")
     if name == "task":
         return _shorten(input_data.get("prompt", ""), 220)
     return _shorten(input_data, 220)
