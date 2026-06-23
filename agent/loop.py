@@ -49,7 +49,11 @@ Standard workflow (follow unless the user says otherwise):
 
 Rules:
 - transcript/scenes JSON 用 read_file 的 offset/limit 或 bash grep 查询, 严禁整文件读入。
-- watch_video 有成本, 只在转写稿无法判断画面时使用。
+- watch_video 有成本, 只在 transcript/TTS 已理解大部分内容、但某些片段的视觉信息
+  无法用语言完整表达时使用, 例如商品动作、人物表情、打斗、画面遮挡、内嵌字幕。
+- watch_video 片段尽量 >=4s; 短片段默认 mode=auto 直接裁视频给 VL, 失败会退回抽帧;
+  长内容先按 transcript/scenes 分段, 不要把整部长视频无差别丢给 VL。如果 VL/TTS
+  返回参数、权限、账号或 endpoint 错误, 不要连续重试同一调用。
 - 超长素材(>30min)用 task 派 subagent 分段分析, 只回收结构化摘要。
 - 剪辑判断力 (什么是钩子/节奏/片长/字幕样式) 以加载的赛道 skill 为准, 不要凭空发挥。
 - 渲染和长转写丢后台后, 可以继续规划下一条片子, 不要干等。

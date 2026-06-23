@@ -86,7 +86,8 @@ def _scenes(**kw):
 
 def _watch(**kw):
     from perception.watch import watch_video
-    return watch_video(kw["path"], kw["start"], kw["end"], kw["question"])
+    return watch_video(kw["path"], kw["start"], kw["end"], kw["question"],
+                       kw.get("mode", "auto"))
 
 
 def _tts(**kw):
@@ -264,18 +265,24 @@ TOOLS = [
          "path": {"type": "string"}, "threshold": {"type": "number"}},
          "required": ["path"]}},
     {"name": "watch_video", "description":
-        "Look at a video segment with the VL model (qwen3-vl-plus): extracts frames "
-        "from [start,end] seconds and answers your question about the visuals. "
-        "Costs money -- use only when the transcript is not enough.",
+        "Look at a video segment with the VL model (qwen3-vl-plus) when transcript "
+        "does not fully express the visuals. mode=auto clips a short mp4 segment for "
+        "video understanding and falls back to sampled frames if the endpoint rejects "
+        "video input; mode=frames forces the older frame-sequence path; mode=video "
+        "forces direct segment video input. Use segments of at least ~4 seconds. "
+        "Costs money -- do not retry the same failing call repeatedly.",
      "input_schema": {"type": "object", "properties": {
          "path": {"type": "string"}, "start": {"type": "number"},
-         "end": {"type": "number"}, "question": {"type": "string"}},
+         "end": {"type": "number"}, "question": {"type": "string"},
+         "mode": {"type": "string", "enum": ["auto", "video", "frames"]}},
          "required": ["path", "start", "end", "question"]}},
     # -- 行动层 --
     {"name": "tts", "description":
         "Synthesize voiceover speech (cosyvoice-v3-flash) -> wav file. "
         "voice e.g. longanyang/longanhuan_v3. Optional Chinese instruction like "
-        "'你正在进行广告促销，你说话的情感是happy。'",
+        "'你正在进行广告促销，你说话的情感是happy。' If the tool reports account, "
+        "region, or HTTP/WebSocket access errors, do not retry repeatedly; ask the "
+        "user to run /dashscope or proceed without synthetic voiceover.",
      "input_schema": {"type": "object", "properties": {
          "text": {"type": "string"}, "output": {"type": "string"},
          "voice": {"type": "string"}, "instruction": {"type": "string"}},

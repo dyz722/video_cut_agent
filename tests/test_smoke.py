@@ -70,6 +70,10 @@ def main():
     check("tool schema/handler 一一对应",
           {t["name"] for t in TOOLS} == set(TOOL_HANDLERS.keys()),
           str({t["name"] for t in TOOLS} ^ set(TOOL_HANDLERS.keys())))
+    watch_schema = next(t for t in TOOLS if t["name"] == "watch_video")["input_schema"]
+    check("watch_video supports visual mode selection",
+          "mode" in watch_schema["properties"]
+          and set(watch_schema["properties"]["mode"]["enum"]) == {"auto", "video", "frames"})
     pyproject = (ROOT / "pyproject.toml").read_text()
     check("veoai CLI entry registered", 'veoai = "main:main"' in pyproject)
     check("legacy CLI aliases removed",
@@ -243,6 +247,12 @@ def main():
           ("a.mp4", "b.mp4", "noaudio.mp4", "bgm.mp3", "banner.png")))
     check("symlinked materials are readable",
           "duration:" in perception.probe.probe_media("materials/external_link.mp4"))
+    short_frames = perception.watch.extract_frames(
+        mats / "a.mp4", 0, 1, proj / "analysis" / "frames", "short_vl_smoke")
+    check("watch_video extracts DashScope minimum sequence frames", len(short_frames) >= 4)
+    short_clip = perception.watch.extract_video_segment(
+        mats / "a.mp4", 0, 1, proj / "analysis" / "vl_segments", "short_vl_smoke")
+    check("watch_video can create direct VL video segment", short_clip.exists())
 
     print("[3b] sessions")
     sid1 = session_store.new_session()
