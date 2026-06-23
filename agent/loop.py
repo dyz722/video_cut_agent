@@ -18,7 +18,7 @@ from .background import BG
 from . import context_memory
 from .events import EVENTS
 from . import log_store
-from .model_client import create_message_with_retry, request_timeout_seconds
+from .model_client import create_message_with_retry
 from .todo import TODO
 from .tools import TOOLS, TOOL_HANDLERS, SKILLS
 
@@ -260,12 +260,6 @@ def _emit_model_retry(attempt: int, attempts: int, delay: float, exc: Exception)
                 f"{type(exc).__name__}: {_shorten(exc, 120)}")
 
 
-def _emit_model_attempt(attempt: int, attempts: int):
-    EVENTS.emit("status",
-                f"model API request attempt {attempt}/{attempts} "
-                f"(timeout {request_timeout_seconds():.0f}s)")
-
-
 def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
                run_id: str | None = None):
     if verbose is None:
@@ -298,7 +292,6 @@ def agent_loop(messages: list, verbose: bool | None = None, cancel_event=None,
             with status(f"thinking with {config.main_model()} ({config.main_model_protocol()})"):
                 response = create_message_with_retry(
                     config.client().messages.create,
-                    on_attempt=_emit_model_attempt,
                     on_retry=_emit_model_retry,
                     model=config.main_model(), system=build_system(),
                     messages=messages, tools=TOOLS, max_tokens=8000)
