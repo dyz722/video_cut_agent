@@ -57,6 +57,10 @@ def _clip(text: str, width: int) -> str:
     return text if len(text) <= width else text[:max(width - 1, 0)] + "…"
 
 
+def _safe_input(prompt: str) -> str:
+    return config._safe_input(prompt)
+
+
 def _box(title: str, lines: list[str], width: int) -> str:
     inner = max(width - 4, 20)
     out = [

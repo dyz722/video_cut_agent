@@ -11,6 +11,7 @@
 """
 
 import json
+import builtins
 import http.client
 import os
 import shutil
@@ -95,6 +96,12 @@ def main():
     check("legacy CLI aliases removed",
           'video-agent = "main:main"' not in pyproject
           and 'video-cut-agent = "main:main"' not in pyproject)
+    old_input = builtins.input
+    try:
+        builtins.input = lambda _prompt="": "  1  "
+        check("CLI safe input wrapper available", cli._safe_input("resume:") == "1")
+    finally:
+        builtins.input = old_input
     openai_tools = anthropic_tools_to_openai([{
         "name": "demo_tool",
         "description": "demo",
