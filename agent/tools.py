@@ -295,7 +295,8 @@ TOOLS = [
     # -- 行动层 --
     {"name": "tts", "description":
         "Synthesize voiceover speech (cosyvoice-v3-flash) -> wav file. "
-        "voice e.g. longanyang/longanhuan_v3. Optional Chinese instruction like "
+        "Use the tested default voice longanyang unless the user explicitly asks "
+        "for another voice. Optional Chinese instruction like "
         "'你正在进行广告促销，你说话的情感是happy。' If the tool reports account, "
         "region, or HTTP/WebSocket access errors, do not retry repeatedly; ask the "
         "user to run /dashscope or proceed without synthetic voiceover.",

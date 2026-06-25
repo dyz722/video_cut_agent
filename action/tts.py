@@ -11,6 +11,12 @@ import requests
 
 from agent import config
 
+FALLBACK_VOICE = "longanyang"
+
+
+def _is_engine_parameter_error(message: str) -> bool:
+    return "Engine return error code:" in message or "TaskFailed:" in message
+
 
 def _synthesize_sdk(text: str, out_fp, voice: str, instruction: str | None):
     from dashscope.audio.tts_v2 import AudioFormat, SpeechSynthesizer
@@ -66,16 +72,11 @@ def _synthesize_http(text: str, out_fp, voice: str, instruction: str | None):
     return None
 
 
-def synthesize(text: str, output: str, voice: str = "longanyang",
-               instruction: str = None) -> str:
-    if not text.strip():
-        return "Error: empty text"
-    out_fp = config.safe_path(output)
-    out_fp.parent.mkdir(parents=True, exist_ok=True)
-
+def _synthesize_once(text: str, out_fp, voice: str, instruction: str | None) -> str | None:
     sdk_error = None
     try:
         _synthesize_sdk(text, out_fp, voice, instruction)
+        return None
     except Exception as e:
         sdk_error = f"{type(e).__name__}: {e}"
         try:
@@ -86,11 +87,36 @@ def synthesize(text: str, output: str, voice: str = "longanyang",
                     f"{type(http_exc).__name__}: {http_exc}")
         if http_error:
             return f"{http_error}\nSDK detail: {sdk_error}"
+    return None
+
+
+def synthesize(text: str, output: str, voice: str = FALLBACK_VOICE,
+               instruction: str = None) -> str:
+    if not text.strip():
+        return "Error: empty text"
+    out_fp = config.safe_path(output)
+    out_fp.parent.mkdir(parents=True, exist_ok=True)
+
+    error = _synthesize_once(text, out_fp, voice, instruction)
+    used_voice = voice
+    fallback_note = ""
+    if error and voice != FALLBACK_VOICE and _is_engine_parameter_error(error):
+        if out_fp.exists():
+            out_fp.unlink()
+        fallback_error = _synthesize_once(text, out_fp, FALLBACK_VOICE, instruction)
+        if not fallback_error:
+            used_voice = FALLBACK_VOICE
+            fallback_note = f" Requested voice={voice} failed, fell back to {FALLBACK_VOICE}."
+            error = None
+        else:
+            error = f"{error}\nFallback voice {FALLBACK_VOICE} also failed: {fallback_error}"
+    if error:
+        return error
 
     from perception.probe import media_duration
     try:
         dur = media_duration(out_fp)
     except Exception:
         dur = 0
-    return (f"TTS saved: {output} ({dur:.2f}s, voice={voice}). "
+    return (f"TTS saved: {output} ({dur:.2f}s, voice={used_voice}).{fallback_note} "
             f"在 timeline 的 audio.voiceover 里引用, 注意给字幕留同样的时间区间。")

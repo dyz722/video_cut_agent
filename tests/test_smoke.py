@@ -179,6 +179,29 @@ def main():
               config.dashscope_tts_url().endswith("/services/audio/tts/SpeechSynthesizer"))
         check("DashScope local ASR defaults to qwen3-asr-flash",
               config.asr_local_model() == "qwen3-asr-flash")
+        import action.tts as tts_mod
+        tts_calls = []
+        old_tts_sdk = tts_mod._synthesize_sdk
+        old_tts_http = tts_mod._synthesize_http
+        try:
+            def fake_tts_sdk(_text, out_fp, voice, _instruction):
+                tts_calls.append(voice)
+                if voice != tts_mod.FALLBACK_VOICE:
+                    raise RuntimeError("[cosyvoice:]Engine return error code: 428")
+                out_fp.write_bytes(b"RIFFfake")
+
+            def fake_tts_http(*_args, **_kwargs):
+                return "Error: TTS HTTP 400: [cosyvoice:]Engine return error code: 428"
+
+            tts_mod._synthesize_sdk = fake_tts_sdk
+            tts_mod._synthesize_http = fake_tts_http
+            result = tts_mod.synthesize("测试", "analysis/tts_fallback.wav", voice="bad_voice")
+            check("TTS engine voice errors fall back to default",
+                  "fell back to longanyang" in result
+                  and tts_calls == ["bad_voice", "longanyang"])
+        finally:
+            tts_mod._synthesize_sdk = old_tts_sdk
+            tts_mod._synthesize_http = old_tts_http
     finally:
         for k, v in old_dash_env.items():
             if v is None:

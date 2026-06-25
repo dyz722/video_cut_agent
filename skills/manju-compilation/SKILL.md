@@ -41,7 +41,7 @@ description: 漫剧/动态漫合集赛道策略：选集逻辑、排序、情绪
 - 对白字幕: style=default, 跟 transcript 时间戳; 漫剧原片自带字幕时
   **不要再加对白字幕** (用 watch_video 确认原片是否有内嵌字幕)
 - 旁白补叙: 剧情连播需要串场时用 tts 生成旁白,
-  voice=longanhuan_v3, instruction="你现在说话的角色是一个旁白，你说话的情感是neutral。"
+  voice=longanyang, instruction="你现在说话的角色是一个旁白，你说话的情感是neutral。"
   旁白处原声 volume 降到 0.3, 旁白字幕用 caption 样式
 - BGM: 高能混剪可整片压一条节奏 BGM (volume 0.3, ducking=true);
   剧情连播保留原声不加 BGM
